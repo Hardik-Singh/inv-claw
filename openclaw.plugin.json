@@ -1,0 +1,37 @@
+{
+  "id": "inv-claw",
+  "name": "Inv-Claw Audit",
+  "version": "0.1.0",
+  "extensions": ["dist/index.js"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Path to SQLite database file"
+      },
+      "dashboardPort": {
+        "type": "number",
+        "default": 7749,
+        "description": "Port for the audit dashboard"
+      },
+      "enableDashboard": {
+        "type": "boolean",
+        "default": true,
+        "description": "Auto-start dashboard server"
+      }
+    }
+  },
+  "uiHints": {
+    "dbPath": {
+      "label": "Database Path",
+      "placeholder": "~/.invariance-audit/audit.db"
+    },
+    "dashboardPort": {
+      "label": "Dashboard Port"
+    },
+    "enableDashboard": {
+      "label": "Enable Dashboard"
+    }
+  }
+}

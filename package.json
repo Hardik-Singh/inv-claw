@@ -1,28 +1,26 @@
 {
-  "name": "invariance-audit",
+  "name": "inv-claw",
   "version": "0.1.0",
   "description": "Passive audit logging plugin for OpenClaw agents — local SQLite + dashboard",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r dashboard dist/dashboard",
     "dev": "tsc --watch",
-    "dashboard": "python3 server.py"
+    "server": "node dist/server.js"
   },
   "openclaw": {
-    "type": "plugin",
-    "hooks": ["command:new"]
+    "extensions": ["dist/index.js"]
   },
-  "keywords": ["openclaw", "plugin", "audit", "logging", "invariance"],
+  "keywords": ["openclaw", "plugin", "audit", "logging", "invariance", "inv-claw"],
   "author": "Hardik Singh",
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^11.0.0",
-    "ws": "^8.16.0"
+    "fastify": "^5.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
-    "@types/ws": "^8.5.10",
     "typescript": "^5.3.0"
   }
 }

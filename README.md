@@ -1,90 +1,104 @@
-# invariance-audit
+# inv-claw
 
-Passive audit logging plugin for [OpenClaw](https://openclaw.dev) agents. Every tool call, file read, web fetch, email, and exec gets recorded to a local SQLite database with an instant browser dashboard.
+Passive audit logging plugin for [OpenClaw](https://openclaw.ai) agents. Every message, command, file read, web fetch, and email gets recorded to a local SQLite database with an instant browser dashboard.
 
-**Zero config. Zero dependencies beyond Node + Python 3.**
+**Zero config. Pure Node. No Python.**
 
-## Quick Start
+## Install
 
 ```bash
-# Install the plugin in your OpenClaw project
-npm install invariance-audit
+# Via OpenClaw CLI
+openclaw plugins install inv-claw
 
-# Or clone and link
+# Or install locally for development
 git clone https://github.com/Hardik-Singh/invariance-audit
 cd invariance-audit && npm install && npm run build
+openclaw plugins install -l .
 ```
 
-OpenClaw will auto-discover the plugin via `package.json` → `openclaw.hooks`.
+OpenClaw discovers the plugin via `openclaw.plugin.json` + `package.json` → `openclaw.extensions`.
 
 ## Dashboard
 
 The audit dashboard launches automatically on **http://localhost:7749** when the plugin loads.
 
-You can also start it manually:
+Start it standalone:
 
 ```bash
-python3 server.py
+node dist/server.js
 ```
 
 ### Features
-- Real-time activity feed with 3-second polling
+- Real-time activity feed (3s polling)
 - Filter by action type: file, web, exec, email, message, LLM
 - Searchable event history
 - Tag editor for organizing events
 - Light/dark theme toggle
-- Mock data fallback for demo/empty databases
+- Mock data fallback for demo
 
-## What It Logs
+## What It Captures (V1)
 
-| Action Type | What's Captured | Enrichment (V1) |
-|-------------|----------------|------------------|
-| **file** | Read/write/edit/delete | File contents (< 50KB) |
-| **web** | HTTP fetches, navigation | Re-fetched response body |
-| **email** | Send/receive | Full message metadata |
-| **message** | Slack, Discord, chat | Full message content |
-| **exec** | Shell commands | Command + args |
-| **llm** | Model API calls | Model + prompt preview |
+| Action Type | Source | Enrichment |
+|-------------|--------|------------|
+| **message** | `message:received`, `message:sent` hooks | Full content, channel, sender/recipient |
+| **file** | Context-detected file operations | Reads file contents (< 50KB) |
+| **web** | Context-detected HTTP operations | Re-fetches URL, captures status + body |
+| **email** | Context-detected email operations | To, from, subject, body from params |
+| **exec** | `command:*` hooks | Command + args (no stdout — needs hook bridge) |
+| **llm** | Context-detected LLM calls | Model + prompt preview (no response — needs hook bridge) |
 
-## API
+### Coming in V2 (when OpenClaw bridges internal hooks)
 
-All endpoints served on `http://localhost:7749`:
+- `tool:after_call` — capture tool name, params, result, duration
+- `llm:input` / `llm:output` — capture full LLM request/response
+- See [openclaw/openclaw#20575](https://github.com/openclaw/openclaw/discussions/20575)
+
+## Slash Command
+
+```
+/audit        — show last 5 audit events
+/audit 20     — show last 20 audit events
+```
+
+## REST API
+
+All endpoints on `http://localhost:7749`:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/events` | List events (query: `type`, `session`, `q`, `limit`) |
+| `GET` | `/api/events` | List events (`type`, `session`, `q`, `limit`) |
 | `GET` | `/api/events/:id` | Single event detail |
 | `GET` | `/api/stats` | Aggregate statistics |
 | `PUT` | `/api/events/:id/tags` | Update event tags |
 
+## Configuration
+
+Plugin config in your OpenClaw config file:
+
+```yaml
+plugins:
+  entries:
+    inv-claw:
+      enabled: true
+      config:
+        dbPath: ~/.invariance-audit/audit.db
+        dashboardPort: 7749
+        enableDashboard: true
+```
+
 ## Storage
 
-Events are stored in `~/.invariance-audit/audit.db` (SQLite, WAL mode). Override with:
-
-```bash
-export INVARIANCE_AUDIT_DB=/custom/path/audit.db
-```
+Events stored in `~/.invariance-audit/audit.db` (SQLite, WAL mode).
 
 ## On-Chain Upgrade Path
 
-invariance-audit is the local-first entry point to the [Invariance Protocol](https://invariance.dev). When you're ready for cryptographic verification and on-chain enforcement:
+inv-claw is the local-first entry point to the [Invariance Protocol](https://invariance.dev):
 
-1. **Local** → SQLite audit log (this plugin)
-2. **Signed** → Cryptographic provenance via Invariance SDK
-3. **On-chain** → Immutable execution logs on Base L2
-
-```bash
-npm install @invariance/sdk
-```
+1. **Local** — SQLite audit log (this plugin)
+2. **Signed** — Cryptographic provenance via `@invariance/sdk`
+3. **On-chain** — Immutable execution logs on Base L2
 
 See [invariance.dev/docs](https://invariance.dev/docs) for the upgrade guide.
-
-## Configuration
-
-| Env Variable | Default | Description |
-|-------------|---------|-------------|
-| `INVARIANCE_AUDIT_DB` | `~/.invariance-audit/audit.db` | Database path |
-| `INVARIANCE_AUDIT_PORT` | `7749` | Dashboard port |
 
 ## License
 

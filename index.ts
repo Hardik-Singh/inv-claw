@@ -1,82 +1,92 @@
-import Database from "better-sqlite3";
-import { execSync, spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as https from "https";
 import * as http from "http";
-import * as os from "os";
-import * as path from "path";
-import WebSocket from "ws";
+import { ensureDb, insertEvent, getEvents, closeDb } from "./db";
+import { startServer, stopServer } from "./server";
+import type Database from "better-sqlite3";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                              */
+/*  Types — real OpenClaw plugin API                                   */
 /* ------------------------------------------------------------------ */
 
-interface AuditEvent {
-  id?: number;
-  timestamp: string;
-  session_id: string;
-  action_type: string;
-  summary: string;
-  detail_json: string;
-  tags: string;
-  enrichment_json: string;
+interface HookEvent {
+  type: "command" | "session" | "agent" | "gateway" | "message";
+  action: string;
+  sessionKey: string;
+  timestamp: Date;
+  messages: string[];
+  context: Record<string, unknown>;
 }
 
-interface OpenClawAPI {
-  on(event: string, cb: (payload: unknown) => void): void;
-  getSessionId(): string;
+interface HookMetadata {
+  name: string;
+  description: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
+interface ServiceConfig {
+  id: string;
+  start: () => void | Promise<void>;
+  stop: () => void | Promise<void>;
+}
 
-const DB_DIR = path.join(os.homedir(), ".invariance-audit");
-const DB_PATH = path.join(DB_DIR, "audit.db");
-const WS_URL = "ws://127.0.0.1:18789";
-const WS_RETRY_MS = 10_000;
-const DASHBOARD_PORT = 7749;
+interface CommandContext {
+  senderId: string;
+  channel: string;
+  isAuthorizedSender: boolean;
+  args: string;
+}
 
-/* ------------------------------------------------------------------ */
-/*  Database                                                           */
-/* ------------------------------------------------------------------ */
+interface CommandConfig {
+  name: string;
+  description: string;
+  acceptsArgs: boolean;
+  requireAuth: boolean;
+  handler: (ctx: CommandContext) => { text: string };
+}
 
-function ensureDb(): Database.Database {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS events (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp       TEXT    NOT NULL,
-      session_id      TEXT    NOT NULL,
-      action_type     TEXT    NOT NULL,
-      summary         TEXT    NOT NULL DEFAULT '',
-      detail_json     TEXT    NOT NULL DEFAULT '{}',
-      tags            TEXT    NOT NULL DEFAULT '[]',
-      enrichment_json TEXT    NOT NULL DEFAULT '{}'
-    );
-    CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-    CREATE INDEX IF NOT EXISTS idx_events_type    ON events(action_type);
-    CREATE INDEX IF NOT EXISTS idx_events_ts      ON events(timestamp);
-  `);
-  return db;
+interface PluginConfig {
+  dbPath?: string;
+  dashboardPort?: number;
+  enableDashboard?: boolean;
+}
+
+interface OpenClawPluginAPI {
+  registerHook(
+    event: string,
+    handler: (event: HookEvent) => void | Promise<void>,
+    metadata: HookMetadata
+  ): void;
+  registerService(config: ServiceConfig): void;
+  registerCommand(config: CommandConfig): void;
+  logger: {
+    info: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
+  config: {
+    plugins?: { entries?: Record<string, { config?: PluginConfig }> };
+  };
 }
 
 /* ------------------------------------------------------------------ */
 /*  Action type detection                                              */
 /* ------------------------------------------------------------------ */
 
-function detectActionType(payload: Record<string, unknown>): string {
-  const cmd = String(payload.command ?? payload.tool ?? payload.type ?? "").toLowerCase();
+function detectActionType(event: HookEvent): string {
+  if (event.type === "message") return "message";
+  if (event.type === "command") return "exec";
+  if (event.type === "agent") return "exec";
+  if (event.type === "gateway") return "exec";
+
+  const ctx = event.context;
+  const cmd = String(
+    ctx.command ?? ctx.tool ?? ctx.type ?? ""
+  ).toLowerCase();
   if (/read|write|edit|glob|file|mkdir|rm/.test(cmd)) return "file";
   if (/email|smtp|send_?mail/.test(cmd)) return "email";
-  if (/message|chat|slack|discord|send/.test(cmd)) return "message";
   if (/fetch|http|curl|browse|web|url|navigate/.test(cmd)) return "web";
   if (/exec|bash|shell|run|spawn/.test(cmd)) return "exec";
   if (/llm|claude|gpt|openai|anthropic|completion/.test(cmd)) return "llm";
+
   return "unknown";
 }
 
@@ -84,153 +94,206 @@ function detectActionType(payload: Record<string, unknown>): string {
 /*  Enrichment helpers                                                 */
 /* ------------------------------------------------------------------ */
 
-function enrichFile(payload: Record<string, unknown>): Record<string, unknown> {
-  const filePath = String(payload.path ?? payload.file_path ?? payload.filename ?? "");
+/** Read file contents for file actions. */
+function enrichFile(ctx: Record<string, unknown>): Record<string, unknown> {
+  const filePath = String(ctx.path ?? ctx.file_path ?? ctx.filename ?? "");
   if (!filePath) return {};
   try {
     const stat = fs.statSync(filePath);
-    const content = stat.size < 50_000 ? fs.readFileSync(filePath, "utf-8") : `[file too large: ${stat.size} bytes]`;
-    return { file_path: filePath, file_size: stat.size, content_preview: content.slice(0, 2000) };
+    const content =
+      stat.size < 50_000
+        ? fs.readFileSync(filePath, "utf-8")
+        : `[file too large: ${stat.size} bytes]`;
+    return {
+      file_path: filePath,
+      file_size: stat.size,
+      content_preview: content.slice(0, 2000),
+    };
   } catch {
     return { file_path: filePath, error: "could not read file" };
   }
 }
 
-function enrichWeb(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const url = String(payload.url ?? payload.href ?? "");
+/** Re-fetch URL for web actions. */
+function enrichWeb(
+  ctx: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const url = String(ctx.url ?? ctx.href ?? "");
   if (!url) return Promise.resolve({});
   return new Promise((resolve) => {
     const mod = url.startsWith("https") ? https : http;
     const req = mod.get(url, { timeout: 5000 }, (res) => {
       let body = "";
-      res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      res.on("end", () => resolve({ url, status: res.statusCode, body_preview: body.slice(0, 2000) }));
+      res.on("data", (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      res.on("end", () =>
+        resolve({
+          url,
+          status: res.statusCode,
+          body_preview: body.slice(0, 2000),
+        })
+      );
     });
     req.on("error", () => resolve({ url, error: "fetch failed" }));
-    req.on("timeout", () => { req.destroy(); resolve({ url, error: "timeout" }); });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ url, error: "timeout" });
+    });
   });
 }
 
-/* ------------------------------------------------------------------ */
-/*  Dashboard spawner                                                  */
-/* ------------------------------------------------------------------ */
+/** Extract email fields from params. */
+function enrichEmail(ctx: Record<string, unknown>): Record<string, unknown> {
+  return {
+    to: ctx.to ?? ctx.recipient ?? "",
+    from: ctx.from ?? ctx.sender ?? "",
+    subject: ctx.subject ?? "",
+    body_preview: String(ctx.body ?? ctx.text ?? ctx.content ?? "").slice(
+      0,
+      2000
+    ),
+  };
+}
 
-let dashboardProc: ChildProcess | null = null;
-
-function spawnDashboard(): void {
-  if (dashboardProc && !dashboardProc.killed) return;
-  try {
-    // Check if port already in use
-    execSync(`lsof -i :${DASHBOARD_PORT} -t`, { stdio: "ignore" });
-    return; // port already in use, dashboard probably running
-  } catch {
-    // port free, spawn
-  }
-  const serverPath = path.join(__dirname, "server.py");
-  if (!fs.existsSync(serverPath)) return;
-  dashboardProc = spawn("python3", [serverPath], {
-    stdio: "ignore",
-    detached: true,
-    env: { ...process.env, INVARIANCE_AUDIT_DB: DB_PATH },
-  });
-  dashboardProc.unref();
+/** Extract message fields from OpenClaw message event context. */
+function enrichMessage(event: HookEvent): Record<string, unknown> {
+  const ctx = event.context;
+  return {
+    from: ctx.from ?? "",
+    to: ctx.to ?? "",
+    content: String(ctx.content ?? "").slice(0, 2000),
+    channel: ctx.channelId ?? "",
+    messageId: ctx.messageId ?? "",
+    success: ctx.success,
+  };
 }
 
 /* ------------------------------------------------------------------ */
-/*  WebSocket listener                                                 */
+/*  Event handler factory                                              */
 /* ------------------------------------------------------------------ */
 
-function connectWs(db: Database.Database, sessionId: string): void {
-  const insert = db.prepare(`
-    INSERT INTO events (timestamp, session_id, action_type, summary, detail_json, tags, enrichment_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
+function createHandler(db: Database.Database) {
+  return async (event: HookEvent): Promise<void> => {
+    const actionType = detectActionType(event);
+    const ctx = event.context;
 
-  function connect(): void {
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(WS_URL);
-    } catch {
-      setTimeout(connect, WS_RETRY_MS);
-      return;
+    // Build summary
+    let summary = "";
+    if (event.type === "message" && event.action === "received") {
+      summary = `${String(ctx.channelId ?? "?")} <- ${String(ctx.from ?? "unknown").slice(0, 40)}`;
+    } else if (event.type === "message" && event.action === "sent") {
+      summary = `${String(ctx.channelId ?? "?")} -> ${String(ctx.to ?? "unknown").slice(0, 40)}`;
+    } else if (event.type === "command") {
+      summary = `/${event.action}`;
+    } else {
+      summary = String(
+        ctx.summary ?? ctx.command ?? ctx.tool ?? event.action ?? ""
+      ).slice(0, 200);
     }
 
-    ws.on("open", () => {
-      console.log("[invariance-audit] WS connected");
-    });
+    // Enrich based on action type
+    let enrichment: Record<string, unknown> = {};
+    if (actionType === "file") enrichment = enrichFile(ctx);
+    if (actionType === "web") enrichment = await enrichWeb(ctx);
+    if (actionType === "email") enrichment = enrichEmail(ctx);
+    if (actionType === "message") enrichment = enrichMessage(event);
 
-    ws.on("message", async (raw: WebSocket.RawData) => {
-      try {
-        const payload = JSON.parse(raw.toString()) as Record<string, unknown>;
-        const actionType = detectActionType(payload);
-        const summary = String(payload.summary ?? payload.command ?? payload.tool ?? "").slice(0, 200);
-
-        let enrichment: Record<string, unknown> = {};
-        if (actionType === "file") enrichment = enrichFile(payload);
-        if (actionType === "web") enrichment = await enrichWeb(payload);
-
-        insert.run(
-          new Date().toISOString(),
-          sessionId,
-          actionType,
-          summary,
-          JSON.stringify(payload),
-          JSON.stringify(payload.tags ?? []),
-          JSON.stringify(enrichment)
-        );
-      } catch {
-        // silently skip malformed messages
-      }
-    });
-
-    ws.on("close", () => {
-      setTimeout(connect, WS_RETRY_MS);
-    });
-
-    ws.on("error", () => {
-      ws.close();
-    });
-  }
-
-  connect();
-}
-
-/* ------------------------------------------------------------------ */
-/*  Plugin entry                                                       */
-/* ------------------------------------------------------------------ */
-
-export function register(api: OpenClawAPI): void {
-  const db = ensureDb();
-  const sessionId = api.getSessionId();
-
-  // Listen for command:new hook events directly
-  api.on("command:new", (payload: unknown) => {
-    const p = payload as Record<string, unknown>;
-    const actionType = detectActionType(p);
-    const summary = String(p.summary ?? p.command ?? p.tool ?? "").slice(0, 200);
-
-    const insert = db.prepare(`
-      INSERT INTO events (timestamp, session_id, action_type, summary, detail_json, tags, enrichment_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const enrichment = actionType === "file" ? enrichFile(p) : {};
-    insert.run(
-      new Date().toISOString(),
-      sessionId,
-      actionType,
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: actionType,
       summary,
-      JSON.stringify(p),
-      JSON.stringify((p.tags as string[]) ?? []),
-      JSON.stringify(enrichment)
-    );
-  });
-
-  // Also listen on WS for broader event capture
-  connectWs(db, sessionId);
-
-  // Spawn dashboard
-  spawnDashboard();
-
-  console.log(`[invariance-audit] Registered. Dashboard: http://localhost:${DASHBOARD_PORT}`);
+      detail_json: JSON.stringify(ctx),
+      tags: JSON.stringify([]),
+      enrichment_json: JSON.stringify(enrichment),
+    });
+  };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Plugin entry — real OpenClaw plugin API                            */
+/* ------------------------------------------------------------------ */
+
+export default {
+  id: "inv-claw",
+  name: "Inv-Claw Audit",
+
+  register(api: OpenClawPluginAPI): void {
+    const pluginConfig =
+      api.config?.plugins?.entries?.["inv-claw"]?.config ?? {};
+    const dbPath = pluginConfig.dbPath;
+    const dashboardPort = pluginConfig.dashboardPort ?? 7749;
+    const enableDashboard = pluginConfig.enableDashboard ?? true;
+
+    const db = ensureDb(dbPath);
+    const handler = createHandler(db);
+
+    // Hook: inbound messages (full content in context)
+    api.registerHook("message:received", handler, {
+      name: "inv-claw.msg-in",
+      description: "Log inbound messages to audit trail",
+    });
+
+    // Hook: outbound messages (full content in context)
+    api.registerHook("message:sent", handler, {
+      name: "inv-claw.msg-out",
+      description: "Log outbound messages to audit trail",
+    });
+
+    // Hook: all command events (new, reset, stop)
+    api.registerHook("command", handler, {
+      name: "inv-claw.command",
+      description: "Log session commands to audit trail",
+    });
+
+    // Hook: agent bootstrap
+    api.registerHook("agent:bootstrap", handler, {
+      name: "inv-claw.bootstrap",
+      description: "Log agent bootstrap events",
+    });
+
+    // Hook: gateway startup
+    api.registerHook("gateway:startup", handler, {
+      name: "inv-claw.startup",
+      description: "Log gateway startup",
+    });
+
+    // Service: dashboard lifecycle
+    if (enableDashboard) {
+      api.registerService({
+        id: "inv-claw-dashboard",
+        start: () => startServer(dashboardPort, dbPath),
+        stop: async () => {
+          await stopServer();
+          closeDb();
+        },
+      });
+    }
+
+    // Slash command: /audit [count]
+    api.registerCommand({
+      name: "audit",
+      description: "Show recent audit events",
+      acceptsArgs: true,
+      requireAuth: true,
+      handler: (ctx: CommandContext) => {
+        const limit = ctx.args ? parseInt(ctx.args, 10) || 5 : 5;
+        const events = getEvents(db, { limit });
+        if (events.length === 0) {
+          return { text: "No audit events recorded yet." };
+        }
+        const lines = events.map(
+          (e) => `[${e.action_type}] ${e.summary} (${e.timestamp})`
+        );
+        return {
+          text: `Last ${events.length} audit events:\n${lines.join("\n")}`,
+        };
+      },
+    });
+
+    api.logger.info(
+      `[inv-claw] Registered. Dashboard: http://localhost:${dashboardPort}`
+    );
+  },
+};
