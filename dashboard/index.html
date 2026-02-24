@@ -73,6 +73,18 @@ body {
 
 /* ── Stats Bar ──────────────────────────────────── */
 .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+
+/* ── Plugins Bar ──────────────────────────────── */
+.plugins-bar { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; margin-bottom: 24px; }
+.plugin-card {
+  background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius);
+  padding: 14px 12px; cursor: pointer; text-align: center;
+  transition: all var(--transition);
+}
+.plugin-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+.plugin-icon { font-size: 1.4rem; margin-bottom: 6px; }
+.plugin-name { font-weight: 600; font-size: 0.8rem; margin-bottom: 2px; }
+.plugin-desc { font-size: 0.65rem; color: var(--muted); }
 .stat-card {
   background: var(--card-bg); backdrop-filter: blur(12px);
   border: 1px solid var(--card-border); border-radius: var(--radius);
@@ -114,6 +126,17 @@ body {
 }
 .search-input::placeholder { color: var(--muted); }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(196,93,62,0.15); }
+
+.time-filters select { padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--card-border); background: var(--surface); color: var(--fg); font-size: 0.85rem; cursor: pointer; }
+
+/* ── Config ─────────────────────────────────── */
+.config-section { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 24px; margin-top: 20px; }
+.config-section h3 { margin-bottom: 16px; }
+.config-row { margin-bottom: 12px; }
+.config-row label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.config-row input { width: 100%; max-width: 400px; padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--card-border); background: var(--surface); color: var(--fg); }
+.config-section button { margin-top: 12px; padding: 8px 16px; border-radius: var(--radius-sm); border: none; background: var(--accent); color: white; cursor: pointer; }
+#configStatus { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
 
 /* ── Activity Feed ──────────────────────────────── */
 .feed { display: flex; flex-direction: column; gap: 10px; }
@@ -212,9 +235,13 @@ body {
   .header { padding: 16px 20px; }
   .container { padding: 16px 20px; }
   .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  .plugins-bar { grid-template-columns: repeat(4, 1fr); }
   .controls { flex-direction: column; align-items: stretch; }
   .search-input { min-width: 0; }
   .chain-banner { flex-direction: column; text-align: center; }
+}
+@media (max-width: 480px) {
+  .plugins-bar { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
@@ -257,10 +284,55 @@ body {
     </div>
   </div>
 
+  <!-- ── Popular Integrations ──────────────────── -->
+  <div class="plugins-bar">
+    <div class="plugin-card" onclick="filterByType('file')">
+      <div class="plugin-icon">📁</div>
+      <div class="plugin-name">Files</div>
+      <div class="plugin-desc">read, write, edit</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('exec')">
+      <div class="plugin-icon">⌨️</div>
+      <div class="plugin-name">Terminal</div>
+      <div class="plugin-desc">bash, command exec</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('web')">
+      <div class="plugin-icon">🌐</div>
+      <div class="plugin-name">Web Fetch</div>
+      <div class="plugin-desc">HTTP, APIs, scraping</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('browser')">
+      <div class="plugin-icon">🌍</div>
+      <div class="plugin-name">Browser</div>
+      <div class="plugin-desc">automation, control</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('email')">
+      <div class="plugin-icon">📧</div>
+      <div class="plugin-name">Email</div>
+      <div class="plugin-desc">Gmail, SMTP, IMAP</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('message')">
+      <div class="plugin-icon">💬</div>
+      <div class="plugin-name">Messaging</div>
+      <div class="plugin-desc">Telegram, Slack, Discord</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('llm')">
+      <div class="plugin-icon">🧠</div>
+      <div class="plugin-name">LLM</div>
+      <div class="plugin-desc">model calls, prompts</div>
+    </div>
+    <div class="plugin-card" onclick="filterByType('all')">
+      <div class="plugin-icon">📊</div>
+      <div class="plugin-name">All</div>
+      <div class="plugin-desc">show everything</div>
+    </div>
+  </div>
+
   <!-- ── Tabs ───────────────────────────────────── -->
   <div class="tabs">
     <button class="tab active" data-tab="feed" onclick="switchTab('feed')">Activity Feed</button>
     <button class="tab" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
+    <button class="tab" data-tab="config" onclick="switchTab('config')">⚙️ Settings</button>
   </div>
 
   <!-- ── Feed View ──────────────────────────────── -->
@@ -276,11 +348,40 @@ body {
         <button class="chip" data-type="message" onclick="setFilter('message')">💬 Message</button>
         <button class="chip" data-type="llm" onclick="setFilter('llm')">🤖 LLM</button>
       </div>
+      <div class="time-filters">
+        <select id="timeRange" onchange="onTimeRange()">
+          <option value="">All time</option>
+          <option value="1h">Last hour</option>
+          <option value="24h">Last 24h</option>
+          <option value="7d">Last 7 days</option>
+        </select>
+      </div>
       <input class="search-input" id="search" type="text" placeholder="Search events…" oninput="onSearch()">
     </div>
 
     <!-- ── Activity Feed ──────────────────────── -->
     <div class="feed" id="feed"></div>
+  </div>
+
+  <!-- ── Config View ──────────────────────────── -->
+  <div id="view-config" style="display:none;">
+    <div class="config-section">
+      <h3>🔇 Noise Filtering</h3>
+      <div class="config-row">
+        <label>Excluded tools (comma-separated):</label>
+        <input type="text" id="excludedTools" value="heartbeat,health,status,ping,pong,noop" onchange="saveNoiseConfig()">
+      </div>
+      <div class="config-row">
+        <label>Excluded patterns:</label>
+        <input type="text" id="excludedPatterns" value="HEARTBEAT,heartbeat_poll,cron_poll" onchange="saveNoiseConfig()">
+      </div>
+      <div class="config-row">
+        <label>Dedup window (ms):</label>
+        <input type="number" id="dedupWindow" value="5000" onchange="saveNoiseConfig()">
+      </div>
+      <button onclick="saveNoiseConfig()">Save Settings</button>
+      <div id="configStatus"></div>
+    </div>
   </div>
 
   <!-- ── Analytics View ─────────────────────────── -->
@@ -306,6 +407,67 @@ let expandedId = null;
 let events = [];
 
 const ICONS = { file: '📁', web: '🌐', exec: '⚡', email: '📧', message: '💬', llm: '🤖', unknown: '❓' };
+
+/* ── Filtering ───────────────────────────────────── */
+function filterByType(type) {
+  if (type === 'all') {
+    currentFilter = '';
+  } else {
+    currentFilter = type;
+  }
+  fetchEvents();
+}
+
+function onTimeRange() {
+  fetchEvents();
+}
+
+function getTimeRangeParams() {
+  const range = document.getElementById('timeRange')?.value || '';
+  if (!range) return {};
+  
+  const now = new Date();
+  let since;
+  
+  if (range === '1h') {
+    since = new Date(now - 60 * 60 * 1000).toISOString();
+  } else if (range === '24h') {
+    since = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  } else if (range === '7d') {
+    since = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  
+  return since ? { since } : {};
+}
+
+/* ── Config ─────────────────────────────────────── */
+async function saveNoiseConfig() {
+  const excludedTools = document.getElementById('excludedTools').value.split(',').map(s => s.trim()).filter(Boolean);
+  const excludedPatterns = document.getElementById('excludedPatterns').value.split(',').map(s => s.trim()).filter(Boolean);
+  const dedupWindowMs = parseInt(document.getElementById('dedupWindow').value) || 5000;
+  
+  try {
+    await fetch('/api/config/noise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedTools, excludedPatterns, dedupWindowMs })
+    });
+    document.getElementById('configStatus').textContent = '✓ Settings saved!';
+    setTimeout(() => document.getElementById('configStatus').textContent = '', 3000);
+  } catch (e) {
+    document.getElementById('configStatus').textContent = '✗ Error saving settings';
+  }
+}
+
+async function loadNoiseConfig() {
+  try {
+    const res = await fetch('/api/config/noise');
+    const config = await res.json();
+    document.getElementById('excludedTools').value = config.excludedTools?.join(', ') || '';
+    document.getElementById('excludedPatterns').value = config.excludedPatterns?.join(', ') || '';
+    document.getElementById('dedupWindow').value = config.dedupWindowMs || 5000;
+  } catch (e) {}
+}
 
 /* ── Theme ──────────────────────────────────────── */
 function toggleTheme() {
@@ -378,11 +540,27 @@ function renderDetail(ev) {
 }
 
 function renderFileDetail(d, e) {
-  return `<div class="detail-grid">
-    <div class="detail-label">Path</div><div class="detail-value" style="font-family:var(--font-mono);font-size:0.82rem">${esc(e.file_path || d.path || '—')}</div>
-    <div class="detail-label">Size</div><div class="detail-value">${e.file_size ? formatBytes(e.file_size) : '—'}</div>
-    <div class="detail-label">Operation</div><div class="detail-value">${esc(d.command || '—')}</div>
-  </div>${e.content_preview ? `<div class="code-block">${esc(e.content_preview)}</div>` : ''}`;
+  let html = `<div class="detail-grid">
+    <div class="detail-label">Path</div><div class="detail-value" style="font-family:var(--font-mono);font-size:0.82rem">${esc(e.filePath || e.file_path || d.path || '—')}</div>
+    <div class="detail-label">Tool</div><div class="detail-value">${esc(d.toolName || '—')}</div>
+  </div>`;
+  
+  // Show file content for writes
+  if (e.fileContent) {
+    html += `<div class="detail-label" style="margin-top:12px">File Content (${e.fileContent.length} chars)</div><div class="code-block">${esc(e.fileContent)}</div>`;
+  }
+  
+  // Show diff for edits
+  if (e.oldText || e.newText) {
+    if (e.oldText) {
+      html += `<div class="detail-label" style="margin-top:12px">Old Text</div><div class="code-block" style="background:rgba(255,0,0,0.1)">${esc(e.oldText)}</div>`;
+    }
+    if (e.newText) {
+      html += `<div class="detail-label" style="margin-top:8px">New Text</div><div class="code-block" style="background:rgba(0,255,0,0.1)">${esc(e.newText)}</div>`;
+    }
+  }
+  
+  return html;
 }
 
 function renderWebDetail(d, e) {
@@ -495,6 +673,11 @@ async function fetchEvents() {
     if (currentFilter) params.set('type', currentFilter);
     if (currentSearch) params.set('q', currentSearch);
     params.set('limit', '200');
+    
+    // Time range
+    const timeParams = getTimeRangeParams();
+    if (timeParams.since) params.set('since', timeParams.since);
+    
     const res = await fetch('/api/events?' + params);
     events = await res.json();
     renderFeed();
@@ -518,6 +701,7 @@ async function fetchStats() {
 /* ── Polling ────────────────────────────────────── */
 fetchEvents();
 fetchStats();
+loadNoiseConfig();
 setInterval(fetchEvents, 3000);
 setInterval(fetchStats, 5000);
 </script>

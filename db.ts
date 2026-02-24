@@ -38,6 +38,8 @@ export interface EventFilter {
   action_type?: string | null;
   session_id?: string | null;
   search?: string | null;
+  since?: string | null;  // ISO timestamp
+  until?: string | null;  // ISO timestamp
 }
 
 export interface Stats {
@@ -92,7 +94,7 @@ export function getEvents(
   db: Database.Database,
   filter: EventFilter = {}
 ): AuditEvent[] {
-  const { limit = 200, action_type, session_id, search } = filter;
+  const { limit = 200, action_type, session_id, search, since, until } = filter;
   let q = "SELECT * FROM events WHERE 1=1";
   const params: unknown[] = [];
 
@@ -107,6 +109,14 @@ export function getEvents(
   if (search) {
     q += " AND (summary LIKE ? OR detail_json LIKE ?)";
     params.push(`%${search}%`, `%${search}%`);
+  }
+  if (since) {
+    q += " AND timestamp >= ?";
+    params.push(since);
+  }
+  if (until) {
+    q += " AND timestamp <= ?";
+    params.push(until);
   }
   q += " ORDER BY id DESC LIMIT ?";
   params.push(limit);

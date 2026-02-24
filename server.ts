@@ -52,6 +52,8 @@ export async function startServer(
       action_type: q.type || null,
       session_id: q.session || null,
       search: q.q || null,
+      since: q.since || null,
+      until: q.until || null,
     });
   });
 
@@ -93,6 +95,73 @@ export async function startServer(
     }
   );
 
+  // Map tool names to action types
+  function getActionType(toolName: string): string {
+    const tool = (toolName || '').toLowerCase();
+    if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'glob') return 'file';
+    if (tool === 'exec' || tool === 'bash' || tool === 'command') return 'exec';
+    if (tool === 'web_fetch' || tool === 'http' || tool === 'fetch') return 'web';
+    if (tool === 'browser' || tool === 'scrape' || tool === 'crawl') return 'browser';
+    if (tool.includes('email') || tool.includes('mail') || tool.includes('gmail') || tool.includes('smtp')) return 'email';
+    if (tool.includes('message') || tool.includes('send') || tool.includes('telegram') || tool.includes('slack')) return 'message';
+    if (tool === 'llm' || tool.includes('model') || tool.includes('anthropic') || tool.includes('openai')) return 'llm';
+    return 'other';
+  }
+
+  // Noise filtering config
+  const noiseConfig = {
+    excludedTools: ['heartbeat', 'health', 'status', 'ping', 'pong', 'noop', 'null'],
+    excludedPatterns: ['HEARTBEAT', 'heartbeat_poll', 'cron_poll'],
+    dedupWindowMs: 5000, // dedupe identical events within 5 seconds
+  };
+
+  // Track recent events for deduplication
+  const recentEvents = new Map<string, number>();
+  
+  function isDuplicate(toolName: string, params: any, timestamp: string): boolean {
+    const hash = JSON.stringify({ tool: toolName, params });
+    const ts = new Date(timestamp).getTime();
+    
+    // Clean old entries
+    const now = Date.now();
+    for (const [key, time] of recentEvents.entries()) {
+      if (now - time > noiseConfig.dedupWindowMs) {
+        recentEvents.delete(key);
+      }
+    }
+    
+    if (recentEvents.has(hash)) {
+      return true;
+    }
+    recentEvents.set(hash, ts);
+    return false;
+  }
+
+  function shouldExclude(toolName: string, summary: string): boolean {
+    const tool = (toolName || '').toLowerCase();
+    // Exclude certain tools
+    if (noiseConfig.excludedTools.includes(tool)) return true;
+    // Exclude patterns in summary
+    for (const pattern of noiseConfig.excludedPatterns) {
+      if (summary.includes(pattern)) return true;
+    }
+    return false;
+  }
+
+  // API: update noise config
+  app.post("/api/config/noise", async (req) => {
+    const body = (req.body as Record<string, any>) || {};
+    if (body.excludedTools) noiseConfig.excludedTools = body.excludedTools;
+    if (body.excludedPatterns) noiseConfig.excludedPatterns = body.excludedPatterns;
+    if (body.dedupWindowMs) noiseConfig.dedupWindowMs = body.dedupWindowMs;
+    return { ok: true, config: noiseConfig };
+  });
+
+  // API: get noise config
+  app.get("/api/config/noise", async () => {
+    return noiseConfig;
+  });
+
   // API: sync from session transcripts (workaround for hooks bug)
   app.get("/api/sync", async () => {
     const sessionsDir = path.join(process.env.HOME || '/home/hardiksingh', '.openclaw', 'agents', 'main', 'sessions');
@@ -115,27 +184,80 @@ export async function startServer(
               if (entry.type !== 'message') continue;
               
               const msg = entry.message;
-              if (!msg || msg.role !== 'assistant') continue;
-              if (!msg.content) continue;
+              if (!msg) continue;
               
-              for (const block of msg.content) {
-                if (block.type === 'toolCall' && block.name) {
-                  const toolName = block.name;
-                  const params = block.arguments;
-                  
-                  // Insert event
-                  const { insertEvent } = require('./db');
-                  insertEvent(db, {
-                    timestamp: entry.timestamp || new Date().toISOString(),
-                    session_id: sessionId,
-                    action_type: 'file',
-                    summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
-                    detail_json: JSON.stringify({ toolName, params, source: 'transcript' }),
-                    tags: '["synced"]',
-                    enrichment_json: '{}'
-                  });
-                  synced++;
+              // Assistant tool calls
+              if (msg.role === 'assistant' && msg.content) {
+                for (const block of msg.content) {
+                  if (block.type === 'toolCall' && block.name) {
+                    const toolName = block.name;
+                    const params = block.arguments;
+                    const actionType = getActionType(toolName);
+                    const summary = `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`;
+                    
+                    // Noise filter: skip excluded tools
+                    if (shouldExclude(toolName, summary)) continue;
+                    // Noise filter: skip duplicates
+                    if (isDuplicate(toolName, params, entry.timestamp)) continue;
+                    
+                    // Extract file-specific enrichment
+                    let enrichment: Record<string, any> = { tool: toolName, type: actionType };
+                    if (toolName === 'write' && params?.content) {
+                      enrichment.fileContent = String(params.content).slice(0, 2000);
+                      enrichment.filePath = params.path || params.file_path;
+                    } else if (toolName === 'edit' && params?.newText) {
+                      enrichment.oldText = String(params.oldText || '').slice(0, 500);
+                      enrichment.newText = String(params.newText).slice(0, 500);
+                      enrichment.filePath = params.path || params.file_path;
+                    } else if (toolName === 'read' && params?.path) {
+                      enrichment.filePath = params.path;
+                    }
+                    
+                    const { insertEvent } = require('./db');
+                    insertEvent(db, {
+                      timestamp: entry.timestamp || new Date().toISOString(),
+                      session_id: sessionId,
+                      action_type: actionType,
+                      summary: summary,
+                      detail_json: JSON.stringify({ toolName, params, source: 'transcript' }),
+                      tags: '["synced"]',
+                      enrichment_json: JSON.stringify(enrichment)
+                    });
+                    synced++;
+                  }
                 }
+              }
+              
+              // Tool results (contains actual content like emails)
+              if (msg.role === 'toolResult' && msg.toolName) {
+                const toolName = msg.toolName;
+                const result = msg.content;
+                const actionType = getActionType(toolName);
+                
+                // Extract content from tool result
+                let contentPreview = '';
+                if (Array.isArray(result)) {
+                  contentPreview = result.map((r: any) => r.text || r.content || '').join(' ').slice(0, 500);
+                } else if (typeof result === 'string') {
+                  contentPreview = result.slice(0, 500);
+                }
+                
+                const summary = `${toolName}: ${contentPreview.slice(0, 80)}`;
+                
+                // Noise filter
+                if (shouldExclude(toolName, summary)) continue;
+                
+                const { insertEvent } = require('./db');
+                insertEvent(db, {
+                  timestamp: entry.timestamp || new Date().toISOString(),
+                  session_id: sessionId,
+                  action_type: actionType,
+                  summary: summary,
+                  detail_json: JSON.stringify({ toolName, result, source: 'transcript' }),
+                  tags: '["synced", "result"]',
+                  enrichment_json: JSON.stringify({ tool: toolName, type: actionType, preview: contentPreview })
+                });
+                synced++;
               }
             } catch (e) {}
           }
@@ -166,24 +288,53 @@ export async function startServer(
               const entry = JSON.parse(line);
               if (entry.type !== 'message') continue;
               const msg = entry.message;
-              if (!msg || msg.role !== 'assistant' || !msg.content) continue;
+              if (!msg) continue;
               
-              for (const block of msg.content) {
-                if (block.type === 'toolCall' && block.name) {
-                  const toolName = block.name;
-                  const params = block.arguments;
-                  
-                  const { insertEvent } = require('./db');
-                  insertEvent(db, {
-                    timestamp: entry.timestamp || new Date().toISOString(),
-                    session_id: sessionId,
-                    action_type: 'file',
-                    summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
-                    detail_json: JSON.stringify({ toolName, params, source: 'auto-sync' }),
-                    tags: '["auto-synced"]',
-                    enrichment_json: '{}'
-                  });
+              // Assistant tool calls
+              if (msg.role === 'assistant' && msg.content) {
+                for (const block of msg.content) {
+                  if (block.type === 'toolCall' && block.name) {
+                    const toolName = block.name;
+                    const params = block.arguments;
+                    const actionType = getActionType(toolName);
+                    
+                    const { insertEvent } = require('./db');
+                    insertEvent(db, {
+                      timestamp: entry.timestamp || new Date().toISOString(),
+                      session_id: sessionId,
+                      action_type: actionType,
+                      summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
+                      detail_json: JSON.stringify({ toolName, params, source: 'auto-sync' }),
+                      tags: '["auto-synced"]',
+                      enrichment_json: JSON.stringify({ tool: toolName, type: actionType })
+                    });
+                  }
                 }
+              }
+              
+              // Tool results (contains actual content like emails, web fetches)
+              if (msg.role === 'toolResult' && msg.toolName) {
+                const toolName = msg.toolName;
+                const result = msg.content;
+                const actionType = getActionType(toolName);
+                
+                let contentPreview = '';
+                if (Array.isArray(result)) {
+                  contentPreview = result.map((r: any) => r.text || r.content || '').join(' ').slice(0, 500);
+                } else if (typeof result === 'string') {
+                  contentPreview = result.slice(0, 500);
+                }
+                
+                const { insertEvent } = require('./db');
+                insertEvent(db, {
+                  timestamp: entry.timestamp || new Date().toISOString(),
+                  session_id: sessionId,
+                  action_type: actionType,
+                  summary: `${toolName}: ${contentPreview.slice(0, 80)}`,
+                  detail_json: JSON.stringify({ toolName, result, source: 'auto-sync' }),
+                  tags: '["auto-synced", "result"]',
+                  enrichment_json: JSON.stringify({ tool: toolName, type: actionType, preview: contentPreview })
+                });
               }
             } catch (e) {}
           }
