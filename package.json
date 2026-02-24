@@ -1,7 +1,7 @@
 {
   "name": "inv-claw",
   "version": "0.1.0",
-  "description": "Passive audit logging plugin for OpenClaw agents — local SQLite + dashboard",
+  "description": "Track everything your Claw does — every change, every command, full results",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

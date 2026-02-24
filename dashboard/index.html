@@ -3,57 +3,70 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>invariance-audit · Dashboard</title>
+<title>inv-claw · Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Sora:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* ── Reset & Variables ──────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #f5f2ec; --fg: #1a1a1a; --accent: #c45d3e; --muted: #5c5a56;
-  --card-bg: rgba(255,255,255,0.45); --card-border: rgba(255,255,255,0.3);
+  --bg: #f5f2ec; --fg: #1a1a1a; --accent: #c45d3e; --accent-hover: #a94e33; --muted: #5c5a56; --fg-light: #8a8780;
+  --card-bg: rgba(255,255,255,0.45); --card-border: rgba(26,26,26,0.08);
+  --card-shadow: 0 1px 3px rgba(26,26,26,0.04), 0 8px 32px rgba(26,26,26,0.06);
+  --glass: rgba(245,242,236,0.7);
   --surface: #ffffff; --surface-hover: #f0ede7;
-  --code-bg: rgba(0,0,0,0.05); --badge-bg: rgba(196,93,62,0.12);
+  --code-bg: rgba(0,0,0,0.05); --badge-bg: rgba(196,93,62,0.08);
+  --green: #3a8a5c; --green-soft: rgba(58,138,92,0.08);
+  --red: #c44040; --red-soft: rgba(196,64,64,0.08);
   --shadow: 0 2px 16px rgba(0,0,0,0.06);
-  --radius: 12px; --radius-sm: 8px; --radius-pill: 999px;
+  --radius: 16px; --radius-sm: 10px; --radius-pill: 999px;
   --font-heading: 'DM Serif Display', Georgia, serif;
-  --font-body: 'Sora', system-ui, sans-serif;
+  --font-body: 'Geist', -apple-system, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', monospace;
-  --transition: 0.2s ease;
+  --transition: 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 [data-theme="dark"] {
-  --bg: #0a0a0b; --fg: #e8e8f0; --muted: #8888a0;
+  --bg: #0a0a0b; --fg: #e8e8f0; --muted: #8888a0; --fg-light: #6a6a80;
   --card-bg: rgba(17,17,20,0.7); --card-border: rgba(255,255,255,0.08);
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 8px 32px rgba(0,0,0,0.3);
+  --glass: rgba(10,10,11,0.7);
   --surface: #111114; --surface-hover: #1a1a1f;
-  --code-bg: rgba(255,255,255,0.06); --badge-bg: rgba(196,93,62,0.2);
+  --code-bg: rgba(255,255,255,0.06); --badge-bg: rgba(196,93,62,0.15);
   --shadow: 0 2px 16px rgba(0,0,0,0.3);
 }
 
+::selection { background: var(--accent); color: #fff; }
+
 body {
   font-family: var(--font-body); background: var(--bg); color: var(--fg);
-  line-height: 1.6; min-height: 100vh; transition: background var(--transition), color var(--transition);
+  line-height: 1.65; min-height: 100vh; -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition), color var(--transition);
 }
 
 /* ── Header ─────────────────────────────────────── */
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 20px 32px; border-bottom: 1px solid var(--card-border);
-  backdrop-filter: blur(12px); background: var(--card-bg);
+  padding: 16px 32px; height: 64px;
+  border-bottom: 1px solid var(--card-border);
+  backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  background: var(--glass);
   position: sticky; top: 0; z-index: 100;
+  box-shadow: var(--card-shadow);
 }
 .header-left { display: flex; align-items: center; gap: 14px; }
-.logo svg { width: 32px; height: 32px; }
-.header h1 { font-family: var(--font-heading); font-size: 1.4rem; font-weight: 400; }
-.header h1 span { color: var(--muted); font-family: var(--font-body); font-size: 0.75rem; font-weight: 400; margin-left: 8px; }
+.logo svg { width: 28px; height: 28px; }
+.header h1 { font-family: var(--font-heading); font-size: 1.3rem; font-weight: 400; letter-spacing: -0.3px; }
+.header h1 span { color: var(--fg-light); font-family: var(--font-body); font-size: 0.72rem; font-weight: 400; margin-left: 10px; letter-spacing: 0.03em; }
 
 .theme-toggle {
-  background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-pill);
+  background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-sm);
   padding: 8px 14px; cursor: pointer; font-size: 1.1rem; color: var(--fg);
   backdrop-filter: blur(8px); transition: all var(--transition);
 }
-.theme-toggle:hover { background: var(--surface-hover); }
+.theme-toggle:hover { background: var(--surface-hover); transform: translateY(-1px); }
 
 /* ── Container ──────────────────────────────────── */
 .container { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
@@ -63,9 +76,9 @@ body {
 .stat-card {
   background: var(--card-bg); backdrop-filter: blur(12px);
   border: 1px solid var(--card-border); border-radius: var(--radius);
-  padding: 20px; box-shadow: var(--shadow); transition: all var(--transition);
+  padding: 20px 24px; box-shadow: var(--card-shadow); transition: all var(--transition);
 }
-.stat-card:hover { transform: translateY(-2px); }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 24px rgba(26,26,26,0.08); }
 .stat-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
 .stat-value { font-family: var(--font-heading); font-size: 2rem; margin-top: 4px; }
 .stat-sub { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
@@ -108,10 +121,10 @@ body {
 .event-card {
   background: var(--card-bg); backdrop-filter: blur(12px);
   border: 1px solid var(--card-border); border-radius: var(--radius);
-  padding: 16px 20px; cursor: pointer; box-shadow: var(--shadow);
+  padding: 16px 20px; cursor: pointer; box-shadow: var(--card-shadow);
   transition: all var(--transition);
 }
-.event-card:hover { transform: translateY(-1px); border-color: var(--accent); }
+.event-card:hover { transform: translateY(-1px); border-color: rgba(196,93,62,0.3); box-shadow: 0 4px 24px rgba(26,26,26,0.08); }
 .event-card.expanded { border-color: var(--accent); }
 
 .event-header { display: flex; align-items: center; gap: 12px; }
@@ -148,9 +161,9 @@ body {
 }
 
 .status-badge { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 0.72rem; font-weight: 600; }
-.status-200 { background: rgba(34,197,94,0.15); color: #16a34a; }
-.status-4xx { background: rgba(251,191,36,0.15); color: #d97706; }
-.status-5xx { background: rgba(239,68,68,0.15); color: #dc2626; }
+.status-200 { background: var(--green-soft); color: var(--green); }
+.status-4xx { background: rgba(251,191,36,0.1); color: #b8860b; }
+.status-5xx { background: var(--red-soft); color: var(--red); }
 
 /* ── Tags ───────────────────────────────────────── */
 .tags-section { margin-top: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -178,11 +191,11 @@ body {
 .chain-banner p { font-size: 0.88rem; color: var(--muted); }
 .chain-banner strong { color: var(--fg); }
 .chain-link {
-  padding: 8px 20px; border-radius: var(--radius-pill); background: var(--accent);
-  color: #fff; text-decoration: none; font-size: 0.82rem; font-weight: 500;
+  padding: 8px 20px; border-radius: var(--radius-sm); background: var(--fg);
+  color: var(--bg); text-decoration: none; font-size: 0.82rem; font-weight: 500;
   transition: all var(--transition);
 }
-.chain-link:hover { opacity: 0.9; transform: translateY(-1px); }
+.chain-link:hover { background: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(196,93,62,0.2); }
 
 /* ── Analytics placeholder ──────────────────────── */
 .analytics-placeholder {
@@ -211,14 +224,13 @@ body {
 <header class="header">
   <div class="header-left">
     <div class="logo">
-      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="2" y="2" width="28" height="28" rx="6" fill="#E0513A" opacity="0.12"/>
-        <rect x="12" y="6" width="8" height="20" rx="2" fill="#E0513A"/>
-        <rect x="8" y="6" width="16" height="4" rx="1" fill="#E0513A"/>
-        <rect x="8" y="22" width="16" height="4" rx="1" fill="#E0513A"/>
+      <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#E0513A" d="M498.814789,698.826416 C477.519897,699.187439 456.681183,700.250244 435.885864,699.692810 C382.446075,698.260315 330.102417,690.432617 280.324707,669.785889 C262.098083,662.225891 245.051468,652.555969 229.627243,640.095520 C206.259705,621.218201 191.541840,596.799500 183.044601,568.317322 C179.364258,555.981079 175.759644,543.622253 171.696884,529.835754 C173.549683,531.450745 174.509140,531.989380 175.053207,532.805054 C187.333359,551.216858 205.040192,562.869995 224.569931,572.003967 C256.401703,586.891724 290.223511,594.661621 324.914734,599.067993 C359.548859,603.467102 394.323730,604.596252 429.158203,602.749817 C515.690979,598.163147 599.398621,580.555359 679.472473,547.035156 C713.665405,532.721436 746.268127,515.381592 775.680603,492.530457 C795.029297,477.498047 813.086426,461.107147 823.744141,438.557281 C828.218689,429.089996 830.372620,418.525909 833.264771,409.453949 C835.299805,416.582733 837.910278,425.289368 840.264404,434.064789 C845.267639,452.715179 850.368896,471.344055 855.006104,490.086609 C861.457458,516.160950 856.478699,540.289856 841.532349,562.437378 C824.958008,586.997131 802.325806,604.994202 777.405823,620.185303 C727.670044,650.504150 673.301758,669.040710 616.830383,681.939087 C578.121216,690.780457 538.901733,696.179993 498.814789,698.826416 z"/>
+        <path fill="#E0513A" d="M440.864380,415.050842 C419.203278,411.793640 397.975769,408.590637 376.081848,405.287079 C383.189392,404.245605 389.770203,403.283386 396.350342,402.316742 C428.015991,397.664917 459.003510,390.115112 489.795380,381.429382 C526.779053,370.997040 563.804199,360.560791 601.201050,351.787201 C637.310242,343.315674 674.208557,340.014374 711.361206,342.182587 C740.010315,343.854492 767.981323,348.775330 793.150208,363.711029 C807.453308,372.198792 818.319153,383.658020 820.430115,401.017456 C822.092834,414.691010 817.291260,427.017822 810.438110,438.475006 C799.711304,456.408234 784.337524,469.902802 767.492859,481.839844 C766.530823,482.521637 764.683655,482.665802 763.527954,482.261383 C696.777649,458.900940 627.532288,446.115540 558.150024,434.044556 C519.277588,427.281555 480.253662,421.389496 440.864380,415.050842 z"/>
+        <path fill="#E0513B" d="M366.466064,415.564819 C392.089478,419.106964 417.262207,422.571960 442.434937,426.036987 C442.453613,426.509033 442.472321,426.981079 442.490997,427.453156 C433.644318,430.307983 424.769867,433.079865 415.955597,436.031586 C369.993469,451.423431 326.564880,471.685669 289.112671,503.107025 C273.352783,516.329163 258.917450,530.866821 249.070847,549.256042 C246.412598,554.220459 244.340408,559.498718 241.548370,565.621582 C233.015396,561.439514 224.092712,557.523926 215.620377,552.800598 C204.496704,546.599182 194.543900,538.830078 186.898499,528.403992 C174.469360,511.454346 173.541733,493.259735 184.316528,475.133759 C194.053436,458.753723 208.113358,446.997528 224.617462,438.023224 C254.048996,422.019592 285.847656,414.886963 319.091675,414.234344 C334.718689,413.927582 350.373291,415.026001 366.466064,415.564819 z"/>
       </svg>
     </div>
-    <h1>invariance-audit <span>dashboard</span></h1>
+    <h1>inv-claw <span>dashboard</span></h1>
   </div>
   <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">☀️</button>
 </header>
@@ -280,8 +292,8 @@ body {
 
   <!-- ── Chain Banner ───────────────────────────── -->
   <div class="chain-banner">
-    <p><strong>Ready for on-chain verification?</strong> Upgrade to cryptographic provenance with the Invariance SDK.</p>
-    <a href="https://invariance.dev" target="_blank" rel="noopener" class="chain-link">invariance.dev →</a>
+    <p><strong>Ready for cryptographic proof?</strong> Upgrade to tamper-proof verification with the Invariance SDK.</p>
+    <a href="https://useinvariance.com" target="_blank" rel="noopener" class="chain-link">useinvariance.com →</a>
   </div>
 
 </div>
@@ -450,7 +462,7 @@ function formatBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return
 function renderFeed() {
   const feed = document.getElementById('feed');
   if (!events.length) {
-    feed.innerHTML = '<div class="empty-state"><p>No events yet. Start an OpenClaw session to see audit events here.</p></div>';
+    feed.innerHTML = '<div class="empty-state"><p>No events yet. Start an OpenClaw session — inv-claw tracks every change, command, and result automatically.</p></div>';
     return;
   }
   feed.innerHTML = events.map(ev => `

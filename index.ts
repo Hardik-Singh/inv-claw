@@ -1,21 +1,51 @@
 import * as fs from "fs";
-import * as https from "https";
-import * as http from "http";
 import { ensureDb, insertEvent, getEvents, closeDb } from "./db";
 import { startServer, stopServer } from "./server";
 import type Database from "better-sqlite3";
 
 /* ------------------------------------------------------------------ */
-/*  Types — real OpenClaw plugin API                                   */
+/*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface HookEvent {
-  type: "command" | "session" | "agent" | "gateway" | "message";
-  action: string;
+interface ToolCallEvent {
+  toolName: string;
+  params: Record<string, unknown>;
+  result: unknown;
+  error?: string;
+  durationMs: number;
   sessionKey: string;
   timestamp: Date;
-  messages: string[];
-  context: Record<string, unknown>;
+}
+
+interface LLMInputEvent {
+  model: string;
+  prompt: unknown;
+  sessionKey: string;
+  timestamp: Date;
+}
+
+interface LLMOutputEvent {
+  model: string;
+  response: unknown;
+  usage: { inputTokens?: number; outputTokens?: number };
+  sessionKey: string;
+  timestamp: Date;
+}
+
+interface MessageEvent {
+  from: string;
+  to: string;
+  content: string;
+  sessionKey: string;
+  timestamp: Date;
+}
+
+interface ToolResultPersistEvent {
+  toolName: string;
+  params: Record<string, unknown>;
+  result: unknown;
+  sessionKey: string;
+  timestamp: Date;
 }
 
 interface HookMetadata {
@@ -53,7 +83,7 @@ interface PluginConfig {
 interface OpenClawPluginAPI {
   registerHook(
     event: string,
-    handler: (event: HookEvent) => void | Promise<void>,
+    handler: (event: unknown) => void | Promise<void>,
     metadata: HookMetadata
   ): void;
   registerService(config: ServiceConfig): void;
@@ -68,35 +98,25 @@ interface OpenClawPluginAPI {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Action type detection                                              */
+/*  Action type from tool name                                         */
 /* ------------------------------------------------------------------ */
 
-function detectActionType(event: HookEvent): string {
-  if (event.type === "message") return "message";
-  if (event.type === "command") return "exec";
-  if (event.type === "agent") return "exec";
-  if (event.type === "gateway") return "exec";
-
-  const ctx = event.context;
-  const cmd = String(
-    ctx.command ?? ctx.tool ?? ctx.type ?? ""
-  ).toLowerCase();
-  if (/read|write|edit|glob|file|mkdir|rm/.test(cmd)) return "file";
-  if (/email|smtp|send_?mail/.test(cmd)) return "email";
-  if (/fetch|http|curl|browse|web|url|navigate/.test(cmd)) return "web";
-  if (/exec|bash|shell|run|spawn/.test(cmd)) return "exec";
-  if (/llm|claude|gpt|openai|anthropic|completion/.test(cmd)) return "llm";
-
-  return "unknown";
+function toolNameToActionType(toolName: string): string {
+  const t = toolName.toLowerCase();
+  if (/^(read|write|edit|glob|mkdir|rm|file)/.test(t)) return "file";
+  if (/^(email|smtp|send_?mail)/.test(t)) return "email";
+  if (/^(web_?fetch|fetch|http|curl|browse|navigate|url)/.test(t)) return "web";
+  if (/^(exec|bash|shell|run|spawn)/.test(t)) return "exec";
+  if (/^(browser|click|screenshot|form)/.test(t)) return "browser";
+  return "tool";
 }
 
 /* ------------------------------------------------------------------ */
 /*  Enrichment helpers                                                 */
 /* ------------------------------------------------------------------ */
 
-/** Read file contents for file actions. */
-function enrichFile(ctx: Record<string, unknown>): Record<string, unknown> {
-  const filePath = String(ctx.path ?? ctx.file_path ?? ctx.filename ?? "");
+function enrichFile(params: Record<string, unknown>): Record<string, unknown> {
+  const filePath = String(params.path ?? params.file_path ?? params.filename ?? "");
   if (!filePath) return {};
   try {
     const stat = fs.statSync(filePath);
@@ -114,105 +134,167 @@ function enrichFile(ctx: Record<string, unknown>): Record<string, unknown> {
   }
 }
 
-/** Re-fetch URL for web actions. */
-function enrichWeb(
-  ctx: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  const url = String(ctx.url ?? ctx.href ?? "");
-  if (!url) return Promise.resolve({});
-  return new Promise((resolve) => {
-    const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { timeout: 5000 }, (res) => {
-      let body = "";
-      res.on("data", (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-      res.on("end", () =>
-        resolve({
-          url,
-          status: res.statusCode,
-          body_preview: body.slice(0, 2000),
-        })
-      );
-    });
-    req.on("error", () => resolve({ url, error: "fetch failed" }));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({ url, error: "timeout" });
-    });
-  });
-}
-
-/** Extract email fields from params. */
-function enrichEmail(ctx: Record<string, unknown>): Record<string, unknown> {
-  return {
-    to: ctx.to ?? ctx.recipient ?? "",
-    from: ctx.from ?? ctx.sender ?? "",
-    subject: ctx.subject ?? "",
-    body_preview: String(ctx.body ?? ctx.text ?? ctx.content ?? "").slice(
-      0,
-      2000
-    ),
-  };
-}
-
-/** Extract message fields from OpenClaw message event context. */
-function enrichMessage(event: HookEvent): Record<string, unknown> {
-  const ctx = event.context;
-  return {
-    from: ctx.from ?? "",
-    to: ctx.to ?? "",
-    content: String(ctx.content ?? "").slice(0, 2000),
-    channel: ctx.channelId ?? "",
-    messageId: ctx.messageId ?? "",
-    success: ctx.success,
-  };
-}
-
 /* ------------------------------------------------------------------ */
-/*  Event handler factory                                              */
+/*  Hook handlers                                                      */
 /* ------------------------------------------------------------------ */
 
-function createHandler(db: Database.Database) {
-  return async (event: HookEvent): Promise<void> => {
-    const actionType = detectActionType(event);
-    const ctx = event.context;
+function createHandlers(db: Database.Database) {
+  /** after_tool_call — captures every tool invocation with full params + result */
+  function handleToolCall(event: ToolCallEvent): void {
+    const actionType = toolNameToActionType(event.toolName);
 
-    // Build summary
-    let summary = "";
-    if (event.type === "message" && event.action === "received") {
-      summary = `${String(ctx.channelId ?? "?")} <- ${String(ctx.from ?? "unknown").slice(0, 40)}`;
-    } else if (event.type === "message" && event.action === "sent") {
-      summary = `${String(ctx.channelId ?? "?")} -> ${String(ctx.to ?? "unknown").slice(0, 40)}`;
-    } else if (event.type === "command") {
-      summary = `/${event.action}`;
-    } else {
-      summary = String(
-        ctx.summary ?? ctx.command ?? ctx.tool ?? event.action ?? ""
-      ).slice(0, 200);
-    }
+    let summary = `${event.toolName}`;
+    const p = event.params;
+    if (p.path || p.file_path) summary += `: ${String(p.path ?? p.file_path)}`;
+    else if (p.url) summary += `: ${String(p.url)}`;
+    else if (p.command) summary += `: ${String(p.command).slice(0, 120)}`;
+    else if (p.action) summary += `: ${String(p.action)}`;
 
-    // Enrich based on action type
     let enrichment: Record<string, unknown> = {};
-    if (actionType === "file") enrichment = enrichFile(ctx);
-    if (actionType === "web") enrichment = await enrichWeb(ctx);
-    if (actionType === "email") enrichment = enrichEmail(ctx);
-    if (actionType === "message") enrichment = enrichMessage(event);
+    if (actionType === "file") enrichment = enrichFile(p);
+    if (actionType === "web") enrichment = { url: p.url, status: (event.result as Record<string, unknown>)?.status };
+    if (actionType === "email") {
+      enrichment = {
+        to: p.to ?? p.recipient ?? "",
+        from: p.from ?? p.sender ?? "",
+        subject: p.subject ?? "",
+        body_preview: String(p.body ?? p.text ?? p.content ?? "").slice(0, 2000),
+      };
+    }
 
     insertEvent(db, {
       timestamp: event.timestamp.toISOString(),
       session_id: event.sessionKey,
       action_type: actionType,
-      summary,
-      detail_json: JSON.stringify(ctx),
+      summary: summary.slice(0, 200),
+      detail_json: JSON.stringify({
+        toolName: event.toolName,
+        params: event.params,
+        result: typeof event.result === "string" ? event.result.slice(0, 5000) : event.result,
+        error: event.error,
+        durationMs: event.durationMs,
+      }),
       tags: JSON.stringify([]),
       enrichment_json: JSON.stringify(enrichment),
     });
+  }
+
+  /** llm_input — captures every LLM call (prompt going out) */
+  function handleLLMInput(event: LLMInputEvent): void {
+    const promptStr = typeof event.prompt === "string"
+      ? event.prompt
+      : JSON.stringify(event.prompt);
+
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: "llm",
+      summary: `llm_input: ${event.model}`,
+      detail_json: JSON.stringify({
+        direction: "input",
+        model: event.model,
+        prompt_preview: promptStr.slice(0, 5000),
+      }),
+      tags: JSON.stringify([]),
+      enrichment_json: JSON.stringify({ model: event.model }),
+    });
+  }
+
+  /** llm_output — captures every LLM response */
+  function handleLLMOutput(event: LLMOutputEvent): void {
+    const respStr = typeof event.response === "string"
+      ? event.response
+      : JSON.stringify(event.response);
+
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: "llm",
+      summary: `llm_output: ${event.model} (${event.usage?.inputTokens ?? "?"}in/${event.usage?.outputTokens ?? "?"}out)`,
+      detail_json: JSON.stringify({
+        direction: "output",
+        model: event.model,
+        response_preview: respStr.slice(0, 5000),
+        usage: event.usage,
+      }),
+      tags: JSON.stringify([]),
+      enrichment_json: JSON.stringify({ model: event.model, usage: event.usage }),
+    });
+  }
+
+  /** message_received — inbound messages */
+  function handleMessageReceived(event: MessageEvent): void {
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: "message",
+      summary: `msg_in: ${event.from} -> ${event.to}`,
+      detail_json: JSON.stringify({
+        direction: "received",
+        from: event.from,
+        to: event.to,
+        content: event.content.slice(0, 5000),
+      }),
+      tags: JSON.stringify([]),
+      enrichment_json: JSON.stringify({
+        from: event.from,
+        to: event.to,
+        content_preview: event.content.slice(0, 2000),
+      }),
+    });
+  }
+
+  /** message_sent — outbound messages */
+  function handleMessageSent(event: MessageEvent): void {
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: "message",
+      summary: `msg_out: ${event.from} -> ${event.to}`,
+      detail_json: JSON.stringify({
+        direction: "sent",
+        from: event.from,
+        to: event.to,
+        content: event.content.slice(0, 5000),
+      }),
+      tags: JSON.stringify([]),
+      enrichment_json: JSON.stringify({
+        from: event.from,
+        to: event.to,
+        content_preview: event.content.slice(0, 2000),
+      }),
+    });
+  }
+
+  /** tool_result_persist — full transcript entry for tool results */
+  function handleToolResultPersist(event: ToolResultPersistEvent): void {
+    insertEvent(db, {
+      timestamp: event.timestamp.toISOString(),
+      session_id: event.sessionKey,
+      action_type: "transcript",
+      summary: `persist: ${event.toolName}`,
+      detail_json: JSON.stringify({
+        toolName: event.toolName,
+        params: event.params,
+        result: typeof event.result === "string" ? event.result.slice(0, 10000) : event.result,
+      }),
+      tags: JSON.stringify([]),
+      enrichment_json: "{}",
+    });
+  }
+
+  return {
+    handleToolCall,
+    handleLLMInput,
+    handleLLMOutput,
+    handleMessageReceived,
+    handleMessageSent,
+    handleToolResultPersist,
   };
 }
 
 /* ------------------------------------------------------------------ */
-/*  Plugin entry — real OpenClaw plugin API                            */
+/*  Plugin entry                                                       */
 /* ------------------------------------------------------------------ */
 
 export default {
@@ -227,36 +309,42 @@ export default {
     const enableDashboard = pluginConfig.enableDashboard ?? true;
 
     const db = ensureDb(dbPath);
-    const handler = createHandler(db);
+    const h = createHandlers(db);
 
-    // Hook: inbound messages (full content in context)
-    api.registerHook("message:received", handler, {
+    // Tool calls — captures read, write, edit, exec, web_fetch, browser, etc.
+    api.registerHook("after_tool_call", h.handleToolCall as (e: unknown) => void, {
+      name: "inv-claw.tool-call",
+      description: "Log every tool call (file, exec, web, browser, email) to audit trail",
+    });
+
+    // LLM calls — prompt going out
+    api.registerHook("llm_input", h.handleLLMInput as (e: unknown) => void, {
+      name: "inv-claw.llm-input",
+      description: "Log LLM prompts to audit trail",
+    });
+
+    // LLM calls — response coming back
+    api.registerHook("llm_output", h.handleLLMOutput as (e: unknown) => void, {
+      name: "inv-claw.llm-output",
+      description: "Log LLM responses to audit trail",
+    });
+
+    // Messages — inbound
+    api.registerHook("message_received", h.handleMessageReceived as (e: unknown) => void, {
       name: "inv-claw.msg-in",
       description: "Log inbound messages to audit trail",
     });
 
-    // Hook: outbound messages (full content in context)
-    api.registerHook("message:sent", handler, {
+    // Messages — outbound
+    api.registerHook("message_sent", h.handleMessageSent as (e: unknown) => void, {
       name: "inv-claw.msg-out",
       description: "Log outbound messages to audit trail",
     });
 
-    // Hook: all command events (new, reset, stop)
-    api.registerHook("command", handler, {
-      name: "inv-claw.command",
-      description: "Log session commands to audit trail",
-    });
-
-    // Hook: agent bootstrap
-    api.registerHook("agent:bootstrap", handler, {
-      name: "inv-claw.bootstrap",
-      description: "Log agent bootstrap events",
-    });
-
-    // Hook: gateway startup
-    api.registerHook("gateway:startup", handler, {
-      name: "inv-claw.startup",
-      description: "Log gateway startup",
+    // Full transcript persistence
+    api.registerHook("tool_result_persist", h.handleToolResultPersist as (e: unknown) => void, {
+      name: "inv-claw.persist",
+      description: "Log full tool result transcript entries",
     });
 
     // Service: dashboard lifecycle
@@ -293,7 +381,7 @@ export default {
     });
 
     api.logger.info(
-      `[inv-claw] Registered. Dashboard: http://localhost:${dashboardPort}`
+      `[inv-claw] Registered 6 hooks (after_tool_call, llm_input, llm_output, message_received, message_sent, tool_result_persist). Dashboard: http://localhost:${dashboardPort}`
     );
   },
 };

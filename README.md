@@ -1,6 +1,6 @@
 # inv-claw
 
-Passive audit logging plugin for [OpenClaw](https://openclaw.ai) agents. Every message, command, file read, web fetch, and email gets recorded to a local SQLite database with an instant browser dashboard.
+Track everything your Claw does. Every change, every command ran, full results — all logged to a local SQLite database with an instant browser dashboard.
 
 **Zero config. Pure Node. No Python.**
 
@@ -11,8 +11,8 @@ Passive audit logging plugin for [OpenClaw](https://openclaw.ai) agents. Every m
 openclaw plugins install inv-claw
 
 # Or install locally for development
-git clone https://github.com/Hardik-Singh/invariance-audit
-cd invariance-audit && npm install && npm run build
+git clone https://github.com/Hardik-Singh/inv-claw
+cd inv-claw && npm install && npm run build
 openclaw plugins install -l .
 ```
 
@@ -44,7 +44,7 @@ node dist/server.js
 | **file** | Context-detected file operations | Reads file contents (< 50KB) |
 | **web** | Context-detected HTTP operations | Re-fetches URL, captures status + body |
 | **email** | Context-detected email operations | To, from, subject, body from params |
-| **exec** | `command:*` hooks | Command + args (no stdout — needs hook bridge) |
+| **exec** | `command:*` hooks | Command, args, and full results |
 | **llm** | Context-detected LLM calls | Model + prompt preview (no response — needs hook bridge) |
 
 ### Coming in V2 (when OpenClaw bridges internal hooks)
@@ -92,13 +92,13 @@ Events stored in `~/.invariance-audit/audit.db` (SQLite, WAL mode).
 
 ## On-Chain Upgrade Path
 
-inv-claw is the local-first entry point to the [Invariance Protocol](https://invariance.dev):
+inv-claw is the local-first entry point to [Invariance](https://useinvariance.com):
 
 1. **Local** — SQLite audit log (this plugin)
 2. **Signed** — Cryptographic provenance via `@invariance/sdk`
 3. **On-chain** — Immutable execution logs on Base L2
 
-See [invariance.dev/docs](https://invariance.dev/docs) for the upgrade guide.
+See [useinvariance.com/docs](https://useinvariance.com/docs) for the upgrade guide.
 
 ## License
 
