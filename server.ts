@@ -146,6 +146,52 @@ export async function startServer(
     return { synced };
   });
 
+  // Auto-sync every 10 seconds (workaround for hooks bug)
+  setInterval(() => {
+    try {
+      const sessionsDir = path.join(process.env.HOME || '/home/hardiksingh', '.openclaw', 'agents', 'main', 'sessions');
+      if (!fs.existsSync(sessionsDir)) return;
+      
+      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));
+      for (const file of files) {
+        const filePath = path.join(sessionsDir, file);
+        const sessionId = file.replace('.jsonl', '');
+        
+        try {
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const lines = content.split('\n').filter(l => l.trim());
+          
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+              if (entry.type !== 'message') continue;
+              const msg = entry.message;
+              if (!msg || msg.role !== 'assistant' || !msg.content) continue;
+              
+              for (const block of msg.content) {
+                if (block.type === 'toolCall' && block.name) {
+                  const toolName = block.name;
+                  const params = block.arguments;
+                  
+                  const { insertEvent } = require('./db');
+                  insertEvent(db, {
+                    timestamp: entry.timestamp || new Date().toISOString(),
+                    session_id: sessionId,
+                    action_type: 'file',
+                    summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
+                    detail_json: JSON.stringify({ toolName, params, source: 'auto-sync' }),
+                    tags: '["auto-synced"]',
+                    enrichment_json: '{}'
+                  });
+                }
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }, 10000);
+
   await app.listen({ host: "127.0.0.1", port });
   console.log(`[inv-claw] Dashboard → http://localhost:${port}`);
 }
