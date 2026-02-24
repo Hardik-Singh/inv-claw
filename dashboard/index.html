@@ -312,12 +312,12 @@ function toggleTheme() {
   const html = document.documentElement;
   const next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
   html.setAttribute('data-theme', next);
-  localStorage.setItem('invariance-theme', next);
+  localStorage.setItem('inv-claw-theme', next);
   document.querySelector('.theme-toggle').textContent = next === 'light' ? '☀️' : '🌙';
 }
 
 (function initTheme() {
-  const saved = localStorage.getItem('invariance-theme');
+  const saved = localStorage.getItem('inv-claw-theme');
   if (saved) {
     document.documentElement.setAttribute('data-theme', saved);
     document.querySelector('.theme-toggle').textContent = saved === 'light' ? '☀️' : '🌙';

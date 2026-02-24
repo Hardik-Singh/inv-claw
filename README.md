@@ -81,14 +81,14 @@ plugins:
     inv-claw:
       enabled: true
       config:
-        dbPath: ~/.invariance-audit/audit.db
+        dbPath: ~/.inv-claw/audit.db
         dashboardPort: 7749
         enableDashboard: true
 ```
 
 ## Storage
 
-Events stored in `~/.invariance-audit/audit.db` (SQLite, WAL mode).
+Events stored in `~/.inv-claw/audit.db` (SQLite, WAL mode).
 
 ## On-Chain Upgrade Path
 

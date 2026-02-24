@@ -25,7 +25,7 @@
   "uiHints": {
     "dbPath": {
       "label": "Database Path",
-      "placeholder": "~/.invariance-audit/audit.db"
+      "placeholder": "~/.inv-claw/audit.db"
     },
     "dashboardPort": {
       "label": "Dashboard Port"

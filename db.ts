@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const DEFAULT_DB_DIR = path.join(os.homedir(), ".invariance-audit");
+const DEFAULT_DB_DIR = path.join(os.homedir(), ".inv-claw");
 const DEFAULT_DB_PATH = path.join(DEFAULT_DB_DIR, "audit.db");
 
 const SCHEMA = `
