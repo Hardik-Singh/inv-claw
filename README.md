@@ -1,6 +1,6 @@
 # inv-claw
 
-Track everything your Claw does. Every change, every command ran, full results — all logged to a local SQLite database with an instant browser dashboard.
+Measure everything your OpenClaw does. Every change, every command ran, full results — all logged to a local SQLite database with an instant browser dashboard.
 
 **Zero config. Pure Node. No Python.**
 

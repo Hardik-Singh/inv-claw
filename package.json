@@ -1,7 +1,7 @@
 {
   "name": "inv-claw",
   "version": "0.1.0",
-  "description": "Track everything your Claw does — every change, every command, full results",
+  "description": "Measure everything your OpenClaw does — every change, every command, full results",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

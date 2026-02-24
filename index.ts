@@ -12,40 +12,40 @@ interface ToolCallEvent {
   params: Record<string, unknown>;
   result: unknown;
   error?: string;
-  durationMs: number;
-  sessionKey: string;
-  timestamp: Date;
+  durationMs?: number;
+  sessionKey?: string;
+  timestamp?: Date;
 }
 
 interface LLMInputEvent {
   model: string;
   prompt: unknown;
-  sessionKey: string;
-  timestamp: Date;
+  sessionKey?: string;
+  timestamp?: Date;
 }
 
 interface LLMOutputEvent {
   model: string;
   response: unknown;
   usage: { inputTokens?: number; outputTokens?: number };
-  sessionKey: string;
-  timestamp: Date;
+  sessionKey?: string;
+  timestamp?: Date;
 }
 
 interface MessageEvent {
   from: string;
   to: string;
   content: string;
-  sessionKey: string;
-  timestamp: Date;
+  sessionKey?: string;
+  timestamp?: Date;
 }
 
 interface ToolResultPersistEvent {
   toolName: string;
   params: Record<string, unknown>;
   result: unknown;
-  sessionKey: string;
-  timestamp: Date;
+  sessionKey?: string;
+  timestamp?: Date;
 }
 
 interface HookMetadata {
@@ -138,9 +138,17 @@ function enrichFile(params: Record<string, unknown>): Record<string, unknown> {
 /*  Hook handlers                                                      */
 /* ------------------------------------------------------------------ */
 
+function defaults(event: { sessionKey?: string; timestamp?: Date }) {
+  return {
+    ts: (event.timestamp ?? new Date()).toISOString(),
+    sid: event.sessionKey ?? "default",
+  };
+}
+
 function createHandlers(db: Database.Database) {
   /** after_tool_call — captures every tool invocation with full params + result */
   function handleToolCall(event: ToolCallEvent): void {
+    const { ts, sid } = defaults(event);
     const actionType = toolNameToActionType(event.toolName);
 
     let summary = `${event.toolName}`;
@@ -163,8 +171,8 @@ function createHandlers(db: Database.Database) {
     }
 
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: actionType,
       summary: summary.slice(0, 200),
       detail_json: JSON.stringify({
@@ -181,13 +189,14 @@ function createHandlers(db: Database.Database) {
 
   /** llm_input — captures every LLM call (prompt going out) */
   function handleLLMInput(event: LLMInputEvent): void {
+    const { ts, sid } = defaults(event);
     const promptStr = typeof event.prompt === "string"
       ? event.prompt
       : JSON.stringify(event.prompt);
 
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: "llm",
       summary: `llm_input: ${event.model}`,
       detail_json: JSON.stringify({
@@ -202,13 +211,14 @@ function createHandlers(db: Database.Database) {
 
   /** llm_output — captures every LLM response */
   function handleLLMOutput(event: LLMOutputEvent): void {
+    const { ts, sid } = defaults(event);
     const respStr = typeof event.response === "string"
       ? event.response
       : JSON.stringify(event.response);
 
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: "llm",
       summary: `llm_output: ${event.model} (${event.usage?.inputTokens ?? "?"}in/${event.usage?.outputTokens ?? "?"}out)`,
       detail_json: JSON.stringify({
@@ -224,9 +234,10 @@ function createHandlers(db: Database.Database) {
 
   /** message_received — inbound messages */
   function handleMessageReceived(event: MessageEvent): void {
+    const { ts, sid } = defaults(event);
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: "message",
       summary: `msg_in: ${event.from} -> ${event.to}`,
       detail_json: JSON.stringify({
@@ -246,9 +257,10 @@ function createHandlers(db: Database.Database) {
 
   /** message_sent — outbound messages */
   function handleMessageSent(event: MessageEvent): void {
+    const { ts, sid } = defaults(event);
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: "message",
       summary: `msg_out: ${event.from} -> ${event.to}`,
       detail_json: JSON.stringify({
@@ -268,9 +280,10 @@ function createHandlers(db: Database.Database) {
 
   /** tool_result_persist — full transcript entry for tool results */
   function handleToolResultPersist(event: ToolResultPersistEvent): void {
+    const { ts, sid } = defaults(event);
     insertEvent(db, {
-      timestamp: event.timestamp.toISOString(),
-      session_id: event.sessionKey,
+      timestamp: ts,
+      session_id: sid,
       action_type: "transcript",
       summary: `persist: ${event.toolName}`,
       detail_json: JSON.stringify({

@@ -292,7 +292,7 @@ body {
 
   <!-- ── Chain Banner ───────────────────────────── -->
   <div class="chain-banner">
-    <p><strong>Ready for cryptographic proof?</strong> Upgrade to tamper-proof verification with the Invariance SDK.</p>
+    <p><strong>Interested in auditability and AI agents?</strong> Check out useinvariance.com to see what else the team is building.</p>
     <a href="https://useinvariance.com" target="_blank" rel="noopener" class="chain-link">useinvariance.com →</a>
   </div>
 
@@ -462,7 +462,7 @@ function formatBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return
 function renderFeed() {
   const feed = document.getElementById('feed');
   if (!events.length) {
-    feed.innerHTML = '<div class="empty-state"><p>No events yet. Start an OpenClaw session — inv-claw tracks every change, command, and result automatically.</p></div>';
+    feed.innerHTML = '<div class="empty-state"><p>No events yet. Start an OpenClaw session — inv-claw measures everything your OpenClaw does.</p></div>';
     return;
   }
   feed.innerHTML = events.map(ev => `
