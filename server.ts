@@ -7,117 +7,11 @@ import {
   getEvent,
   getStats,
   updateTags,
-  type AuditEvent,
 } from "./db";
 
 let app: FastifyInstance | null = null;
 
 const DASHBOARD_HTML = path.join(__dirname, "dashboard", "index.html");
-
-/** Mock events returned when the DB is empty (demo mode). */
-function mockEvents(): AuditEvent[] {
-  const now = Date.now();
-  const iso = (offset: number) => new Date(now - offset).toISOString();
-  return [
-    {
-      id: 1,
-      timestamp: iso(30 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "file",
-      summary: "Read config.yaml",
-      detail_json: JSON.stringify({ command: "read", path: "/app/config.yaml" }),
-      tags: '["config","startup"]',
-      enrichment_json: JSON.stringify({
-        file_path: "/app/config.yaml",
-        file_size: 1240,
-        content_preview: "server:\n  port: 8080\n  host: 0.0.0.0",
-      }),
-    },
-    {
-      id: 2,
-      timestamp: iso(25 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "web",
-      summary: "Fetch https://api.example.com/data",
-      detail_json: JSON.stringify({ command: "fetch", url: "https://api.example.com/data" }),
-      tags: '["api"]',
-      enrichment_json: JSON.stringify({
-        url: "https://api.example.com/data",
-        status: 200,
-        body_preview: '{"results": []}',
-      }),
-    },
-    {
-      id: 3,
-      timestamp: iso(20 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "exec",
-      summary: "bash: npm install",
-      detail_json: JSON.stringify({ command: "bash", args: "npm install" }),
-      tags: '["build"]',
-      enrichment_json: "{}",
-    },
-    {
-      id: 4,
-      timestamp: iso(15 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "email",
-      summary: "Send report to team@example.com",
-      detail_json: JSON.stringify({
-        command: "send_email",
-        to: "team@example.com",
-        subject: "Daily Report",
-      }),
-      tags: '["report","daily"]',
-      enrichment_json: JSON.stringify({
-        to: "team@example.com",
-        subject: "Daily Report",
-        body_preview: "Attached is the daily summary...",
-      }),
-    },
-    {
-      id: 5,
-      timestamp: iso(10 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "message",
-      summary: "Slack: #engineering — deploy complete",
-      detail_json: JSON.stringify({
-        command: "slack_send",
-        channel: "#engineering",
-        text: "Deploy complete",
-      }),
-      tags: '["slack","deploy"]',
-      enrichment_json: JSON.stringify({
-        channel: "#engineering",
-        text: "Deploy complete",
-      }),
-    },
-    {
-      id: 6,
-      timestamp: iso(5 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "llm",
-      summary: "claude: summarize PR diff",
-      detail_json: JSON.stringify({
-        command: "llm_call",
-        model: "claude-sonnet-4-6",
-        prompt_preview: "Summarize this PR diff...",
-      }),
-      tags: '["llm","review"]',
-      enrichment_json: "{}",
-    },
-    {
-      id: 7,
-      timestamp: iso(2 * 60_000),
-      session_id: "demo-session-001",
-      action_type: "file",
-      summary: "Write deploy.log",
-      detail_json: JSON.stringify({ command: "write", path: "/var/log/deploy.log" }),
-      tags: '["deploy","log"]',
-      enrichment_json: JSON.stringify({ file_path: "/var/log/deploy.log", file_size: 4520 }),
-    },
-  ];
-}
 
 export async function startServer(
   port = 7749,
@@ -153,14 +47,12 @@ export async function startServer(
   // API: events list
   app.get("/api/events", async (req) => {
     const q = req.query as Record<string, string>;
-    let events = getEvents(db, {
+    return getEvents(db, {
       limit: q.limit ? parseInt(q.limit, 10) : 200,
       action_type: q.type || null,
       session_id: q.session || null,
       search: q.q || null,
     });
-    if (events.length === 0) events = mockEvents();
-    return events;
   });
 
   // API: single event
@@ -171,22 +63,16 @@ export async function startServer(
       return;
     }
     const ev = getEvent(db, id);
-    if (ev) return ev;
-    const mock = mockEvents().find((e) => e.id === id);
-    if (mock) return mock;
-    reply.status(404).send({ error: "not found" });
+    if (!ev) {
+      reply.status(404).send({ error: "not found" });
+      return;
+    }
+    return ev;
   });
 
   // API: stats
   app.get("/api/stats", async () => {
-    const stats = getStats(db);
-    if (stats.total === 0) {
-      const mock = mockEvents();
-      const by_type: Record<string, number> = {};
-      for (const e of mock) by_type[e.action_type] = (by_type[e.action_type] || 0) + 1;
-      return { total: mock.length, by_type, sessions: 1 };
-    }
-    return stats;
+    return getStats(db);
   });
 
   // API: update tags
