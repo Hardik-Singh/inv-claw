@@ -93,6 +93,59 @@ export async function startServer(
     }
   );
 
+  // API: sync from session transcripts (workaround for hooks bug)
+  app.get("/api/sync", async () => {
+    const sessionsDir = path.join(process.env.HOME || '/home/hardiksingh', '.openclaw', 'agents', 'main', 'sessions');
+    let synced = 0;
+    
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));
+      
+      for (const file of files) {
+        const filePath = path.join(sessionsDir, file);
+        const sessionId = file.replace('.jsonl', '');
+        
+        try {
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const lines = content.split('\n').filter(l => l.trim());
+          
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+              if (entry.type !== 'message') continue;
+              
+              const msg = entry.message;
+              if (!msg || msg.role !== 'assistant') continue;
+              if (!msg.content) continue;
+              
+              for (const block of msg.content) {
+                if (block.type === 'toolCall' && block.name) {
+                  const toolName = block.name;
+                  const params = block.arguments;
+                  
+                  // Insert event
+                  const { insertEvent } = require('./db');
+                  insertEvent(db, {
+                    timestamp: entry.timestamp || new Date().toISOString(),
+                    session_id: sessionId,
+                    action_type: 'file',
+                    summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
+                    detail_json: JSON.stringify({ toolName, params, source: 'transcript' }),
+                    tags: '["synced"]',
+                    enrichment_json: '{}'
+                  });
+                  synced++;
+                }
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+    }
+    
+    return { synced };
+  });
+
   await app.listen({ host: "127.0.0.1", port });
   console.log(`[inv-claw] Dashboard → http://localhost:${port}`);
 }

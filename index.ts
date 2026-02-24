@@ -148,6 +148,15 @@ function defaults(event: { sessionKey?: string; timestamp?: Date }) {
 function createHandlers(db: Database.Database) {
   /** after_tool_call — captures every tool invocation with full params + result */
   function handleToolCall(event: ToolCallEvent): void {
+    try {
+      // Debug: log to file so we can see what's coming through
+      const fs = require('fs');
+      fs.appendFileSync('/tmp/inv-claw-debug.log', `[${new Date().toISOString()}] after_tool_call: ${JSON.stringify(event)}\n`);
+    } catch (e) {
+      // Ignore debug errors
+    }
+    
+    try {
     const { ts, sid } = defaults(event);
     const actionType = toolNameToActionType(event.toolName);
 
@@ -185,6 +194,12 @@ function createHandlers(db: Database.Database) {
       tags: JSON.stringify([]),
       enrichment_json: JSON.stringify(enrichment),
     });
+    } catch (err) {
+      try {
+        const fs = require('fs');
+        fs.appendFileSync('/tmp/inv-claw-error.log', `[${new Date().toISOString()}] handleToolCall error: ${String(err)}\n`);
+      } catch {}
+    }
   }
 
   /** llm_input — captures every LLM call (prompt going out) */
