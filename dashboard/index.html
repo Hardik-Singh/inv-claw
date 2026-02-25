@@ -138,6 +138,13 @@ body {
 .config-section button { margin-top: 12px; padding: 8px 16px; border-radius: var(--radius-sm); border: none; background: var(--accent); color: white; cursor: pointer; }
 #configStatus { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
 
+.tool-toggles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tool-toggle { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.8rem; }
+.tool-toggle:hover { border-color: var(--accent); }
+.tool-toggle input { cursor: pointer; }
+.tool-toggle span { user-select: none; }
+@media (max-width: 768px) { .tool-toggles { grid-template-columns: repeat(2, 1fr); } }
+
 /* ── Activity Feed ──────────────────────────────── */
 .feed { display: flex; flex-direction: column; gap: 10px; }
 
@@ -366,12 +373,25 @@ body {
   <!-- ── Config View ──────────────────────────── -->
   <div id="view-config" style="display:none;">
     <div class="config-section">
-      <h3>🔇 Noise Filtering</h3>
-      <div class="config-row">
-        <label>Excluded tools (comma-separated):</label>
-        <input type="text" id="excludedTools" value="heartbeat,health,status,ping,pong,noop" onchange="saveNoiseConfig()">
+      <h3>🔇 Tracking Settings</h3>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;">Toggle which tool types to track. Only enabled tools will be logged.</p>
+      
+      <div class="tool-toggles">
+        <label class="tool-toggle"><input type="checkbox" id="toggle-file" onchange="saveNoiseConfig()"><span>📁 Files</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-web" onchange="saveNoiseConfig()"><span>🌐 Web Fetch</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-exec" onchange="saveNoiseConfig()"><span>⚡ Terminal</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-browser" onchange="saveNoiseConfig()"><span>🌍 Browser</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-email" onchange="saveNoiseConfig()"><span>📧 Email</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-message" onchange="saveNoiseConfig()"><span>💬 Messages</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-llm" onchange="saveNoiseConfig()"><span>🤖 LLM Calls</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-memory" onchange="saveNoiseConfig()"><span>🧠 Memory</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-session" onchange="saveNoiseConfig()"><span>📋 Sessions</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-subagent" onchange="saveNoiseConfig()"><span>🧩 Subagents</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-nodes" onchange="saveNoiseConfig()"><span>📱 Devices</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-cron" onchange="saveNoiseConfig()"><span>⏰ Cron</span></label>
       </div>
-      <div class="config-row">
+      
+      <div class="config-row" style="margin-top:20px;">
         <label>Excluded patterns:</label>
         <input type="text" id="excludedPatterns" value="HEARTBEAT,heartbeat_poll,cron_poll" onchange="saveNoiseConfig()">
       </div>
@@ -441,8 +461,17 @@ function getTimeRangeParams() {
 }
 
 /* ── Config ─────────────────────────────────────── */
+const TOOL_CATEGORIES = ['file', 'web', 'exec', 'browser', 'email', 'message', 'llm', 'memory', 'session', 'subagent', 'nodes', 'cron'];
+
 async function saveNoiseConfig() {
-  const excludedTools = document.getElementById('excludedTools').value.split(',').map(s => s.trim()).filter(Boolean);
+  const enabledTools = [];
+  for (const cat of TOOL_CATEGORIES) {
+    const checkbox = document.getElementById('toggle-' + cat);
+    if (checkbox && checkbox.checked) {
+      enabledTools.push(cat);
+    }
+  }
+  
   const excludedPatterns = document.getElementById('excludedPatterns').value.split(',').map(s => s.trim()).filter(Boolean);
   const dedupWindowMs = parseInt(document.getElementById('dedupWindow').value) || 5000;
   
@@ -450,7 +479,7 @@ async function saveNoiseConfig() {
     await fetch('/api/config/noise', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ excludedTools, excludedPatterns, dedupWindowMs })
+      body: JSON.stringify({ enabledTools, excludedPatterns, dedupWindowMs })
     });
     document.getElementById('configStatus').textContent = '✓ Settings saved!';
     setTimeout(() => document.getElementById('configStatus').textContent = '', 3000);
@@ -463,8 +492,16 @@ async function loadNoiseConfig() {
   try {
     const res = await fetch('/api/config/noise');
     const config = await res.json();
-    document.getElementById('excludedTools').value = config.excludedTools?.join(', ') || '';
-    document.getElementById('excludedPatterns').value = config.excludedPatterns?.join(', ') || '';
+    
+    // Set toggles based on enabled tools
+    for (const cat of TOOL_CATEGORIES) {
+      const checkbox = document.getElementById('toggle-' + cat);
+      if (checkbox) {
+        checkbox.checked = (config.enabledTools || []).includes(cat);
+      }
+    }
+    
+    document.getElementById('excludedPatterns').value = (config.excludedPatterns || []).join(', ');
     document.getElementById('dedupWindow').value = config.dedupWindowMs || 5000;
   } catch (e) {}
 }

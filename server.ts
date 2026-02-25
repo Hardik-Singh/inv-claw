@@ -108,12 +108,53 @@ export async function startServer(
     return 'other';
   }
 
-  // Noise filtering config
-  const noiseConfig = {
-    excludedTools: ['heartbeat', 'health', 'status', 'ping', 'pong', 'noop', 'null', 'exec', 'bash'],
-    excludedPatterns: ['HEARTBEAT', 'heartbeat_poll', 'cron_poll'],
-    dedupWindowMs: 5000, // dedupe identical events within 5 seconds
+  // Tool categories for UI display
+  const TOOL_CATEGORIES: Record<string, string> = {
+    // Files
+    read: 'file', write: 'file', edit: 'file', glob: 'file',
+    // System
+    exec: 'exec', bash: 'exec',
+    // Web
+    web_fetch: 'web', http: 'web', fetch: 'web', web_search: 'web',
+    // Browser
+    browser: 'browser', scrape: 'browser', crawl: 'browser',
+    // Messaging
+    message: 'message', send: 'message',
+    telegram: 'message', discord: 'message', slack: 'message', whatsapp: 'message',
+    // AI/LLM
+    llm: 'llm', model: 'llm', anthropic: 'llm', openai: 'llm',
+    // Email
+    email: 'email', mail: 'email', gmail: 'email', smtp: 'email', imap: 'email',
+    // Memory/Storage
+    memory: 'memory', recall: 'memory', memory_search: 'memory',
+    // Sessions
+    session: 'session', sessions_list: 'session', sessions_history: 'session', sessions_send: 'session',
+    // Subagents
+    subagent: 'subagent', subagents: 'subagent', spawn: 'subagent',
+    // Devices
+    nodes: 'nodes', camera: 'nodes', screen: 'nodes', location: 'nodes',
+    // Other
+    cron: 'cron', gateway: 'gateway', tts: 'tts', canvas: 'canvas', image: 'image',
+    agent: 'agent', agents_list: 'agent',
   };
+
+  // Noise filtering config - opt-in model
+  const noiseConfig = {
+    // Default: only file operations enabled
+    enabledTools: ['read', 'write', 'edit', 'glob'],
+    excludedPatterns: ['HEARTBEAT', 'heartbeat_poll', 'cron_poll'],
+    dedupWindowMs: 5000,
+  };
+
+  function isToolEnabled(toolName: string): boolean {
+    const tool = (toolName || '').toLowerCase();
+    // Check exact match
+    if (noiseConfig.enabledTools.includes(tool)) return true;
+    // Check category
+    const category = TOOL_CATEGORIES[tool];
+    if (category && noiseConfig.enabledTools.includes(category)) return true;
+    return false;
+  }
 
   // Track recent events for deduplication
   const recentEvents = new Map<string, number>();
@@ -138,10 +179,10 @@ export async function startServer(
   }
 
   function shouldExclude(toolName: string, summary: string): boolean {
-    const tool = (toolName || '').toLowerCase();
-    // Exclude certain tools
-    if (noiseConfig.excludedTools.includes(tool)) return true;
-    // Exclude patterns in summary
+    // Opt-in model: exclude if tool is not enabled
+    if (!isToolEnabled(toolName)) return true;
+    
+    // Also exclude patterns in summary
     for (const pattern of noiseConfig.excludedPatterns) {
       if (summary.includes(pattern)) return true;
     }
@@ -151,15 +192,15 @@ export async function startServer(
   // API: update noise config
   app.post("/api/config/noise", async (req) => {
     const body = (req.body as Record<string, any>) || {};
-    if (body.excludedTools) noiseConfig.excludedTools = body.excludedTools;
+    if (body.enabledTools) noiseConfig.enabledTools = body.enabledTools;
     if (body.excludedPatterns) noiseConfig.excludedPatterns = body.excludedPatterns;
     if (body.dedupWindowMs) noiseConfig.dedupWindowMs = body.dedupWindowMs;
-    return { ok: true, config: noiseConfig };
+    return { ok: true, config: noiseConfig, categories: Object.keys(TOOL_CATEGORIES) };
   });
 
   // API: get noise config
   app.get("/api/config/noise", async () => {
-    return noiseConfig;
+    return { ...noiseConfig, categories: Object.keys(TOOL_CATEGORIES) };
   });
 
   // API: sync from session transcripts (workaround for hooks bug)
