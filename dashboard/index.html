@@ -374,21 +374,15 @@ body {
   <div id="view-config" style="display:none;">
     <div class="config-section">
       <h3>🔇 Tracking Settings</h3>
-      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;">Toggle which tool types to track. Only enabled tools will be logged.</p>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;">Toggle which tool types to track.</p>
       
-      <div class="tool-toggles">
+      <div class="tool-toggles" style="grid-template-columns:repeat(3,1fr);">
         <label class="tool-toggle"><input type="checkbox" id="toggle-file" onchange="saveNoiseConfig()"><span>📁 Files</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-web" onchange="saveNoiseConfig()"><span>🌐 Web Fetch</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-web" onchange="saveNoiseConfig()"><span>🌐 Web</span></label>
         <label class="tool-toggle"><input type="checkbox" id="toggle-exec" onchange="saveNoiseConfig()"><span>⚡ Terminal</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-browser" onchange="saveNoiseConfig()"><span>🌍 Browser</span></label>
         <label class="tool-toggle"><input type="checkbox" id="toggle-email" onchange="saveNoiseConfig()"><span>📧 Email</span></label>
         <label class="tool-toggle"><input type="checkbox" id="toggle-message" onchange="saveNoiseConfig()"><span>💬 Messages</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-llm" onchange="saveNoiseConfig()"><span>🤖 LLM Calls</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-memory" onchange="saveNoiseConfig()"><span>🧠 Memory</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-session" onchange="saveNoiseConfig()"><span>📋 Sessions</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-subagent" onchange="saveNoiseConfig()"><span>🧩 Subagents</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-nodes" onchange="saveNoiseConfig()"><span>📱 Devices</span></label>
-        <label class="tool-toggle"><input type="checkbox" id="toggle-cron" onchange="saveNoiseConfig()"><span>⏰ Cron</span></label>
+        <label class="tool-toggle"><input type="checkbox" id="toggle-llm" onchange="saveNoiseConfig()"><span>🤖 LLM</span></label>
       </div>
       
       <div class="config-row" style="margin-top:20px;">

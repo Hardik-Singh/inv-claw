@@ -112,8 +112,8 @@ export async function startServer(
   const TOOL_CATEGORIES: Record<string, string> = {
     // Files
     read: 'file', write: 'file', edit: 'file', glob: 'file',
-    // System
-    exec: 'exec', bash: 'exec',
+    // System (rm treated as file operation for deletes)
+    exec: 'exec', bash: 'exec', rm: 'file', rmdir: 'file',
     // Web
     web_fetch: 'web', http: 'web', fetch: 'web', web_search: 'web',
     // Browser
@@ -247,8 +247,25 @@ export async function startServer(
                     if (toolCallId && recentEvents.has('call:' + toolCallId)) continue;
                     if (toolCallId) recentEvents.set('call:' + toolCallId, Date.now());
                     
+                    // Detect rm/rmdir in exec commands - treat as file operation
+                    let finalActionType = actionType;
+                    let fileOperation = null;
+                    if (toolName === 'exec' && parsedParams?.command) {
+                      const cmd = String(parsedParams.command);
+                      if (cmd.startsWith('rm ') || cmd.startsWith('rm -') || cmd === 'rm' ||
+                          cmd.startsWith('rmdir ') || cmd.startsWith('rmdir -') || cmd === 'rmdir') {
+                        finalActionType = 'file';
+                        // Extract file path from rm command
+                        const parts = cmd.split(/\s+/);
+                        const idx = parts[0] === 'rm' || parts[0] === 'rmdir' ? 1 : 2;
+                        if (parts[idx]) {
+                          fileOperation = { type: 'delete', path: parts[idx] };
+                        }
+                      }
+                    }
+                    
                     // Extract file-specific enrichment
-                    let enrichment: Record<string, any> = { tool: toolName, type: actionType };
+                    let enrichment: Record<string, any> = { tool: toolName, type: finalActionType };
                     if (toolName === 'write' && parsedParams?.content) {
                       enrichment.fileContent = String(parsedParams.content).slice(0, 2000);
                       enrichment.filePath = parsedParams.path || parsedParams.file_path;
@@ -258,13 +275,16 @@ export async function startServer(
                       enrichment.filePath = parsedParams.path || parsedParams.file_path;
                     } else if (toolName === 'read' && parsedParams?.path) {
                       enrichment.filePath = parsedParams.path;
+                    } else if (fileOperation) {
+                      enrichment.filePath = fileOperation.path;
+                      enrichment.operation = fileOperation.type;
                     }
                     
                     const { insertEvent } = require('./db');
                     insertEvent(db, {
                       timestamp: entry.timestamp || new Date().toISOString(),
                       session_id: sessionId,
-                      action_type: actionType,
+                      action_type: finalActionType,
                       summary: summary,
                       detail_json: JSON.stringify({ toolName, params: parsedParams, source: 'transcript' }),
                       tags: '["synced", "call"]',
@@ -316,8 +336,24 @@ export async function startServer(
                     // Parse params
                     const parsedParams = typeof params === 'string' ? JSON.parse(params || '{}') : (params || {});
                     
+                    // Detect rm/rmdir in exec commands - treat as file operation
+                    let finalActionType = actionType;
+                    let fileOperation = null;
+                    if (toolName === 'exec' && parsedParams?.command) {
+                      const cmd = String(parsedParams.command);
+                      if (cmd.startsWith('rm ') || cmd.startsWith('rm -') || cmd === 'rm' ||
+                          cmd.startsWith('rmdir ') || cmd.startsWith('rmdir -') || cmd === 'rmdir') {
+                        finalActionType = 'file';
+                        const parts = cmd.split(/\s+/);
+                        const idx = parts[0] === 'rm' || parts[0] === 'rmdir' ? 1 : 2;
+                        if (parts[idx]) {
+                          fileOperation = { type: 'delete', path: parts[idx] };
+                        }
+                      }
+                    }
+                    
                     // Extract file-specific enrichment
-                    let enrichment: Record<string, any> = { tool: toolName, type: actionType };
+                    let enrichment: Record<string, any> = { tool: toolName, type: finalActionType };
                     if (toolName === 'write' && parsedParams?.content) {
                       enrichment.fileContent = String(parsedParams.content).slice(0, 2000);
                       enrichment.filePath = parsedParams.path || parsedParams.file_path;
@@ -327,13 +363,16 @@ export async function startServer(
                       enrichment.filePath = parsedParams.path || parsedParams.file_path;
                     } else if (toolName === 'read' && parsedParams?.path) {
                       enrichment.filePath = parsedParams.path;
+                    } else if (fileOperation) {
+                      enrichment.filePath = fileOperation.path;
+                      enrichment.operation = fileOperation.type;
                     }
                     
                     const { insertEvent } = require('./db');
                     insertEvent(db, {
                       timestamp: entry.timestamp || new Date().toISOString(),
                       session_id: sessionId,
-                      action_type: actionType,
+                      action_type: finalActionType,
                       summary: `${toolName}: ${JSON.stringify(parsedParams || {}).slice(0, 80)}`,
                       detail_json: JSON.stringify({ toolName, params: parsedParams, source: 'auto-sync' }),
                       tags: '["auto-synced", "call"]',
