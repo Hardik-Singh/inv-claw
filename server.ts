@@ -112,8 +112,8 @@ export async function startServer(
   const TOOL_CATEGORIES: Record<string, string> = {
     // Files
     read: 'file', write: 'file', edit: 'file', glob: 'file',
-    // System (rm treated as file operation for deletes)
-    exec: 'exec', bash: 'exec', rm: 'file', rmdir: 'file',
+    // System 
+    exec: 'exec', bash: 'exec', rm: 'exec', rmdir: 'exec',
     // Web
     web_fetch: 'web', http: 'web', fetch: 'web', web_search: 'web',
     // Browser
@@ -178,9 +178,9 @@ export async function startServer(
     return false;
   }
 
-  function shouldExclude(toolName: string, summary: string): boolean {
-    // Opt-in model: exclude if tool is not enabled
-    if (!isToolEnabled(toolName)) return true;
+  function shouldExclude(toolName: string, actionType: string, summary: string): boolean {
+    // Opt-in model: exclude if neither tool nor action type is enabled
+    if (!isToolEnabled(toolName) && !isToolEnabled(actionType)) return true;
     
     // Also exclude patterns in summary
     for (const pattern of noiseConfig.excludedPatterns) {
@@ -239,13 +239,6 @@ export async function startServer(
                     const actionType = getActionType(toolName);
                     // Params can be a string or object - parse if string
                     const parsedParams = typeof params === 'string' ? JSON.parse(params || '{}') : (params || {});
-                    const summary = `${toolName}: ${JSON.stringify(parsedParams || {}).slice(0, 80)}`;
-                    
-                    // Noise filter: skip excluded tools
-                    if (shouldExclude(toolName, summary)) continue;
-                    // Skip duplicates based on tool call ID
-                    if (toolCallId && recentEvents.has('call:' + toolCallId)) continue;
-                    if (toolCallId) recentEvents.set('call:' + toolCallId, Date.now());
                     
                     // Detect rm/rmdir in exec commands - treat as file operation
                     let finalActionType = actionType;
@@ -255,7 +248,6 @@ export async function startServer(
                       if (cmd.startsWith('rm ') || cmd.startsWith('rm -') || cmd === 'rm' ||
                           cmd.startsWith('rmdir ') || cmd.startsWith('rmdir -') || cmd === 'rmdir') {
                         finalActionType = 'file';
-                        // Extract file path from rm command
                         const parts = cmd.split(/\s+/);
                         const idx = parts[0] === 'rm' || parts[0] === 'rmdir' ? 1 : 2;
                         if (parts[idx]) {
@@ -263,6 +255,14 @@ export async function startServer(
                         }
                       }
                     }
+                    
+                    const summary = `${toolName}: ${JSON.stringify(parsedParams || {}).slice(0, 80)}`;
+                    
+                    // Noise filter: check final action type so rm works if file is enabled
+                    if (shouldExclude(toolName, finalActionType, summary)) continue;
+                    // Skip duplicates based on tool call ID
+                    if (toolCallId && recentEvents.has('call:' + toolCallId)) continue;
+                    if (toolCallId) recentEvents.set('call:' + toolCallId, Date.now());
                     
                     // Extract file-specific enrichment
                     let enrichment: Record<string, any> = { tool: toolName, type: finalActionType };
