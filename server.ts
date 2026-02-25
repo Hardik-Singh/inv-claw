@@ -186,31 +186,37 @@ export async function startServer(
               const msg = entry.message;
               if (!msg) continue;
               
-              // Assistant tool calls
+              // Get tool call ID for deduplication
+              const toolCallId = msg.content?.[0]?.id || msg.toolCallId;
+              
+              // Assistant tool calls - these have the params
               if (msg.role === 'assistant' && msg.content) {
                 for (const block of msg.content) {
                   if (block.type === 'toolCall' && block.name) {
                     const toolName = block.name;
                     const params = block.arguments;
                     const actionType = getActionType(toolName);
-                    const summary = `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`;
+                    // Params can be a string or object - parse if string
+                    const parsedParams = typeof params === 'string' ? JSON.parse(params || '{}') : (params || {});
+                    const summary = `${toolName}: ${JSON.stringify(parsedParams || {}).slice(0, 80)}`;
                     
                     // Noise filter: skip excluded tools
                     if (shouldExclude(toolName, summary)) continue;
-                    // Noise filter: skip duplicates
-                    if (isDuplicate(toolName, params, entry.timestamp)) continue;
+                    // Skip duplicates based on tool call ID
+                    if (toolCallId && recentEvents.has('call:' + toolCallId)) continue;
+                    if (toolCallId) recentEvents.set('call:' + toolCallId, Date.now());
                     
                     // Extract file-specific enrichment
                     let enrichment: Record<string, any> = { tool: toolName, type: actionType };
-                    if (toolName === 'write' && params?.content) {
-                      enrichment.fileContent = String(params.content).slice(0, 2000);
-                      enrichment.filePath = params.path || params.file_path;
-                    } else if (toolName === 'edit' && params?.newText) {
-                      enrichment.oldText = String(params.oldText || '').slice(0, 500);
-                      enrichment.newText = String(params.newText).slice(0, 500);
-                      enrichment.filePath = params.path || params.file_path;
-                    } else if (toolName === 'read' && params?.path) {
-                      enrichment.filePath = params.path;
+                    if (toolName === 'write' && parsedParams?.content) {
+                      enrichment.fileContent = String(parsedParams.content).slice(0, 2000);
+                      enrichment.filePath = parsedParams.path || parsedParams.file_path;
+                    } else if (toolName === 'edit' && parsedParams?.newText) {
+                      enrichment.oldText = String(parsedParams.oldText || '').slice(0, 500);
+                      enrichment.newText = String(parsedParams.newText).slice(0, 500);
+                      enrichment.filePath = parsedParams.path || parsedParams.file_path;
+                    } else if (toolName === 'read' && parsedParams?.path) {
+                      enrichment.filePath = parsedParams.path;
                     }
                     
                     const { insertEvent } = require('./db');
@@ -219,45 +225,13 @@ export async function startServer(
                       session_id: sessionId,
                       action_type: actionType,
                       summary: summary,
-                      detail_json: JSON.stringify({ toolName, params, source: 'transcript' }),
-                      tags: '["synced"]',
+                      detail_json: JSON.stringify({ toolName, params: parsedParams, source: 'transcript' }),
+                      tags: '["synced", "call"]',
                       enrichment_json: JSON.stringify(enrichment)
                     });
                     synced++;
                   }
                 }
-              }
-              
-              // Tool results (contains actual content like emails)
-              if (msg.role === 'toolResult' && msg.toolName) {
-                const toolName = msg.toolName;
-                const result = msg.content;
-                const actionType = getActionType(toolName);
-                
-                // Extract content from tool result
-                let contentPreview = '';
-                if (Array.isArray(result)) {
-                  contentPreview = result.map((r: any) => r.text || r.content || '').join(' ').slice(0, 500);
-                } else if (typeof result === 'string') {
-                  contentPreview = result.slice(0, 500);
-                }
-                
-                const summary = `${toolName}: ${contentPreview.slice(0, 80)}`;
-                
-                // Noise filter
-                if (shouldExclude(toolName, summary)) continue;
-                
-                const { insertEvent } = require('./db');
-                insertEvent(db, {
-                  timestamp: entry.timestamp || new Date().toISOString(),
-                  session_id: sessionId,
-                  action_type: actionType,
-                  summary: summary,
-                  detail_json: JSON.stringify({ toolName, result, source: 'transcript' }),
-                  tags: '["synced", "result"]',
-                  enrichment_json: JSON.stringify({ tool: toolName, type: actionType, preview: contentPreview })
-                });
-                synced++;
               }
             } catch (e) {}
           }
@@ -290,7 +264,7 @@ export async function startServer(
               const msg = entry.message;
               if (!msg) continue;
               
-              // Assistant tool calls
+              // Assistant tool calls - these have the params
               if (msg.role === 'assistant' && msg.content) {
                 for (const block of msg.content) {
                   if (block.type === 'toolCall' && block.name) {
@@ -298,44 +272,37 @@ export async function startServer(
                     const params = block.arguments;
                     const actionType = getActionType(toolName);
                     
+                    // Parse params
+                    const parsedParams = typeof params === 'string' ? JSON.parse(params || '{}') : (params || {});
+                    
+                    // Extract file-specific enrichment
+                    let enrichment: Record<string, any> = { tool: toolName, type: actionType };
+                    if (toolName === 'write' && parsedParams?.content) {
+                      enrichment.fileContent = String(parsedParams.content).slice(0, 2000);
+                      enrichment.filePath = parsedParams.path || parsedParams.file_path;
+                    } else if (toolName === 'edit' && parsedParams?.newText) {
+                      enrichment.oldText = String(parsedParams.oldText || '').slice(0, 500);
+                      enrichment.newText = String(parsedParams.newText).slice(0, 500);
+                      enrichment.filePath = parsedParams.path || parsedParams.file_path;
+                    } else if (toolName === 'read' && parsedParams?.path) {
+                      enrichment.filePath = parsedParams.path;
+                    }
+                    
                     const { insertEvent } = require('./db');
                     insertEvent(db, {
                       timestamp: entry.timestamp || new Date().toISOString(),
                       session_id: sessionId,
                       action_type: actionType,
-                      summary: `${toolName}: ${JSON.stringify(params || {}).slice(0, 80)}`,
-                      detail_json: JSON.stringify({ toolName, params, source: 'auto-sync' }),
-                      tags: '["auto-synced"]',
-                      enrichment_json: JSON.stringify({ tool: toolName, type: actionType })
+                      summary: `${toolName}: ${JSON.stringify(parsedParams || {}).slice(0, 80)}`,
+                      detail_json: JSON.stringify({ toolName, params: parsedParams, source: 'auto-sync' }),
+                      tags: '["auto-synced", "call"]',
+                      enrichment_json: JSON.stringify(enrichment)
                     });
                   }
                 }
               }
               
-              // Tool results (contains actual content like emails, web fetches)
-              if (msg.role === 'toolResult' && msg.toolName) {
-                const toolName = msg.toolName;
-                const result = msg.content;
-                const actionType = getActionType(toolName);
-                
-                let contentPreview = '';
-                if (Array.isArray(result)) {
-                  contentPreview = result.map((r: any) => r.text || r.content || '').join(' ').slice(0, 500);
-                } else if (typeof result === 'string') {
-                  contentPreview = result.slice(0, 500);
-                }
-                
-                const { insertEvent } = require('./db');
-                insertEvent(db, {
-                  timestamp: entry.timestamp || new Date().toISOString(),
-                  session_id: sessionId,
-                  action_type: actionType,
-                  summary: `${toolName}: ${contentPreview.slice(0, 80)}`,
-                  detail_json: JSON.stringify({ toolName, result, source: 'auto-sync' }),
-                  tags: '["auto-synced", "result"]',
-                  enrichment_json: JSON.stringify({ tool: toolName, type: actionType, preview: contentPreview })
-                });
-              }
+              // Skip tool results - tool calls already captured with params
             } catch (e) {}
           }
         } catch (e) {}
