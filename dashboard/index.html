@@ -127,7 +127,26 @@ body {
 .search-input::placeholder { color: var(--muted); }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(196,93,62,0.15); }
 
-.time-filters select { padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--card-border); background: var(--surface); color: var(--fg); font-size: 0.85rem; cursor: pointer; }
+.time-select {
+  padding: 8px 16px; border-radius: var(--radius-pill); border: 1px solid var(--card-border);
+  background: var(--card-bg); backdrop-filter: blur(8px); color: var(--fg);
+  font-family: var(--font-body); font-size: 0.85rem; outline: none; cursor: pointer;
+  transition: all var(--transition); -webkit-appearance: none; appearance: none;
+}
+.time-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(196,93,62,0.15); }
+
+.cmd-toggles {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; align-items: center;
+  padding: 10px 16px; border-radius: var(--radius); background: var(--card-bg);
+  border: 1px solid var(--card-border); backdrop-filter: blur(12px);
+}
+.cmd-toggles label {
+  display: flex; align-items: center; gap: 4px; font-size: 0.78rem; font-family: var(--font-mono);
+  color: var(--muted); cursor: pointer; user-select: none; transition: color var(--transition);
+}
+.cmd-toggles label:hover { color: var(--fg); }
+.cmd-toggles input[type="checkbox"] { accent-color: var(--accent); }
+.cmd-toggles-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-right: 4px; }
 
 /* ── Config ─────────────────────────────────── */
 .config-section { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 24px; margin-top: 20px; }
@@ -355,15 +374,29 @@ body {
         <button class="chip" data-type="message" onclick="setFilter('message')">💬 Message</button>
         <button class="chip" data-type="llm" onclick="setFilter('llm')">🤖 LLM</button>
       </div>
-      <div class="time-filters">
-        <select id="timeRange" onchange="onTimeRange()">
-          <option value="">All time</option>
-          <option value="1h">Last hour</option>
-          <option value="24h">Last 24h</option>
-          <option value="7d">Last 7 days</option>
-        </select>
-      </div>
+      <select class="time-select" onchange="onTimeRange(this.value)">
+        <option value="">All time</option>
+        <option value="3600">Last hour</option>
+        <option value="86400">Last day</option>
+        <option value="604800">Last week</option>
+        <option value="2592000">Last month</option>
+      </select>
       <input class="search-input" id="search" type="text" placeholder="Search events…" oninput="onSearch()">
+    </div>
+
+    <div class="cmd-toggles">
+      <span class="cmd-toggles-title">Commands</span>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="rm">rm</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="bash">bash</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="Read">Read</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="Write">Write</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="Edit">Edit</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="Glob">Glob</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="exec">exec</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="curl">curl</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="git">git</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="npm">npm</label>
+      <label><input type="checkbox" checked onchange="onCmdToggle()" value="docker">docker</label>
     </div>
 
     <!-- ── Activity Feed ──────────────────────── -->
@@ -417,6 +450,8 @@ body {
 /* ── State ──────────────────────────────────────── */
 let currentFilter = '';
 let currentSearch = '';
+let currentTimeRange = '';
+let excludedTools = [];
 let expandedId = null;
 let events = [];
 
@@ -534,6 +569,24 @@ function setFilter(type) {
 function onSearch() {
   currentSearch = document.getElementById('search').value;
   fetchEvents();
+}
+
+function onTimeRange(seconds) {
+  if (seconds) {
+    currentTimeRange = new Date(Date.now() - seconds * 1000).toISOString();
+  } else {
+    currentTimeRange = '';
+  }
+  fetchEvents();
+  fetchStats();
+}
+
+function onCmdToggle() {
+  const checkboxes = document.querySelectorAll('.cmd-toggles input[type="checkbox"]');
+  excludedTools = [];
+  checkboxes.forEach(cb => { if (!cb.checked) excludedTools.push(cb.value); });
+  fetchEvents();
+  fetchStats();
 }
 
 /* ── Time formatting ────────────────────────────── */
@@ -698,9 +751,16 @@ function toggleEvent(id) {
 }
 
 /* ── Data fetching ──────────────────────────────── */
+function buildFilterParams() {
+  const params = new URLSearchParams();
+  if (currentTimeRange) params.set('since', currentTimeRange);
+  if (excludedTools.length) params.set('exclude', excludedTools.join(','));
+  return params;
+}
+
 async function fetchEvents() {
   try {
-    const params = new URLSearchParams();
+    const params = buildFilterParams();
     if (currentFilter) params.set('type', currentFilter);
     if (currentSearch) params.set('q', currentSearch);
     params.set('limit', '200');
@@ -717,7 +777,8 @@ async function fetchEvents() {
 
 async function fetchStats() {
   try {
-    const res = await fetch('/api/stats');
+    const params = buildFilterParams();
+    const res = await fetch('/api/stats?' + params);
     const s = await res.json();
     document.getElementById('stat-total').textContent = s.total ?? '—';
     document.getElementById('stat-sessions').textContent = s.sessions ?? '—';

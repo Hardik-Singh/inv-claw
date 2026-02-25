@@ -38,8 +38,9 @@ export interface EventFilter {
   action_type?: string | null;
   session_id?: string | null;
   search?: string | null;
-  since?: string | null;  // ISO timestamp
-  until?: string | null;  // ISO timestamp
+  since?: string | null;
+  until?: string | null;
+  exclude_tools?: string[] | null;
 }
 
 export interface Stats {
@@ -94,7 +95,7 @@ export function getEvents(
   db: Database.Database,
   filter: EventFilter = {}
 ): AuditEvent[] {
-  const { limit = 200, action_type, session_id, search, since, until } = filter;
+  const { limit = 200, action_type, session_id, search, since, until, exclude_tools } = filter;
   let q = "SELECT * FROM events WHERE 1=1";
   const params: unknown[] = [];
 
@@ -118,6 +119,12 @@ export function getEvents(
     q += " AND timestamp <= ?";
     params.push(until);
   }
+  if (exclude_tools && exclude_tools.length > 0) {
+    for (const tool of exclude_tools) {
+      q += " AND summary NOT LIKE ?";
+      params.push(`%${tool}%`);
+    }
+  }
   q += " ORDER BY id DESC LIMIT ?";
   params.push(limit);
 
@@ -133,17 +140,36 @@ export function getEvent(
     | undefined;
 }
 
-export function getStats(db: Database.Database): Stats {
+export function getStats(db: Database.Database, filter: EventFilter = {}): Stats {
+  const { since, until, exclude_tools } = filter;
+  let where = "WHERE 1=1";
+  const params: unknown[] = [];
+
+  if (since) {
+    where += " AND timestamp >= ?";
+    params.push(since);
+  }
+  if (until) {
+    where += " AND timestamp <= ?";
+    params.push(until);
+  }
+  if (exclude_tools && exclude_tools.length > 0) {
+    for (const tool of exclude_tools) {
+      where += " AND summary NOT LIKE ?";
+      params.push(`%${tool}%`);
+    }
+  }
+
   const total = (
-    db.prepare("SELECT COUNT(*) as c FROM events").get() as { c: number }
+    db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...params) as { c: number }
   ).c;
   const rows = db
-    .prepare("SELECT action_type, COUNT(*) as c FROM events GROUP BY action_type")
-    .all() as { action_type: string; c: number }[];
+    .prepare(`SELECT action_type, COUNT(*) as c FROM events ${where} GROUP BY action_type`)
+    .all(...params) as { action_type: string; c: number }[];
   const by_type: Record<string, number> = {};
   for (const r of rows) by_type[r.action_type] = r.c;
   const sessions = (
-    db.prepare("SELECT COUNT(DISTINCT session_id) as c FROM events").get() as {
+    db.prepare(`SELECT COUNT(DISTINCT session_id) as c FROM events ${where}`).get(...params) as {
       c: number;
     }
   ).c;

@@ -54,6 +54,7 @@ export async function startServer(
       search: q.q || null,
       since: q.since || null,
       until: q.until || null,
+      exclude_tools: q.exclude ? q.exclude.split(",").map((s: string) => s.trim()).filter(Boolean) : null,
     });
   });
 
@@ -73,8 +74,12 @@ export async function startServer(
   });
 
   // API: stats
-  app.get("/api/stats", async () => {
-    return getStats(db);
+  app.get("/api/stats", async (req) => {
+    const q = req.query as Record<string, string>;
+    return getStats(db, {
+      since: q.since || null,
+      exclude_tools: q.exclude ? q.exclude.split(",").map((s: string) => s.trim()).filter(Boolean) : null,
+    });
   });
 
   // API: update tags

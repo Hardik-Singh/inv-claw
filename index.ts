@@ -104,10 +104,12 @@ interface OpenClawPluginAPI {
 function toolNameToActionType(toolName: string): string {
   const t = toolName.toLowerCase();
   if (/^(read|write|edit|glob|mkdir|rm|file)/.test(t)) return "file";
-  if (/^(email|smtp|send_?mail)/.test(t)) return "email";
+  if (/^(email|smtp|send_?mail|gmail|outlook|mailtrap|inbox|draft)/.test(t) || /mail|send_email/.test(t)) return "email";
   if (/^(web_?fetch|fetch|http|curl|browse|navigate|url)/.test(t)) return "web";
   if (/^(exec|bash|shell|run|spawn)/.test(t)) return "exec";
   if (/^(browser|click|screenshot|form)/.test(t)) return "browser";
+  if (/^(slack)/.test(t)) return "message";
+  if (/^(gh_|github_|sql_|db_)/.test(t)) return "tool";
   return "tool";
 }
 
@@ -172,10 +174,13 @@ function createHandlers(db: Database.Database) {
     if (actionType === "web") enrichment = { url: p.url, status: (event.result as Record<string, unknown>)?.status };
     if (actionType === "email") {
       enrichment = {
-        to: p.to ?? p.recipient ?? "",
+        to: p.to ?? p.recipient ?? p.recipients ?? "",
         from: p.from ?? p.sender ?? "",
-        subject: p.subject ?? "",
-        body_preview: String(p.body ?? p.text ?? p.content ?? "").slice(0, 2000),
+        subject: p.subject ?? p.title ?? "",
+        body_preview: String(p.body ?? p.text ?? p.content ?? p.message ?? p.html_body ?? "").slice(0, 2000),
+        cc: p.cc ?? "",
+        bcc: p.bcc ?? "",
+        attachments: p.attachments ?? [],
       };
     }
 
