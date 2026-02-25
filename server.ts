@@ -110,7 +110,7 @@ export async function startServer(
 
   // Noise filtering config
   const noiseConfig = {
-    excludedTools: ['heartbeat', 'health', 'status', 'ping', 'pong', 'noop', 'null'],
+    excludedTools: ['heartbeat', 'health', 'status', 'ping', 'pong', 'noop', 'null', 'exec', 'bash'],
     excludedPatterns: ['HEARTBEAT', 'heartbeat_poll', 'cron_poll'],
     dedupWindowMs: 5000, // dedupe identical events within 5 seconds
   };
